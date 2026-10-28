@@ -1,0 +1,6 @@
+target/
+dist/
+dist-ci/
+saves/
+*.blend1
+__pycache__/

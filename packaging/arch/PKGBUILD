@@ -1,0 +1,36 @@
+# Pacote para Arch Linux / Omarchy, compilado a partir do código-fonte.
+# Uso: coloque este PKGBUILD ao lado de pericia-sim-<versão>-codigo-fonte.tar.gz e rode
+#   makepkg -si
+pkgname=pericia-sim
+pkgver=0.9.1
+pkgrel=1
+pkgdesc="Simulador de treinamento em informática forense (POPs SENASP vol. 5) — conteúdo fictício"
+arch=('x86_64')
+license=('custom')
+depends=('glibc' 'libgl' 'libx11' 'libxi' 'libxkbcommon' 'xorg-xwayland')
+optdepends=('alsa-lib: som' 'pipewire-alsa: som via PipeWire (padrão no Omarchy)' 'wayland: janela Wayland nativa (PERICIA_WAYLAND=1)')
+makedepends=('cargo')
+source=("pericia-sim-${pkgver}-codigo-fonte.tar.gz")
+sha256sums=('SKIP')
+
+build() {
+  cd "pericia-sim-${pkgver}"
+  export RUSTUP_TOOLCHAIN=stable
+  cargo build --release --locked -p pericia_app
+}
+
+check() {
+  cd "pericia-sim-${pkgver}"
+  cargo test --release --locked
+}
+
+package() {
+  cd "pericia-sim-${pkgver}"
+  install -Dm755 target/release/pericia-sim "$pkgdir/usr/lib/pericia-sim/pericia-sim"
+  cp -r assets "$pkgdir/usr/lib/pericia-sim/assets"
+  install -dm755 "$pkgdir/usr/bin"
+  ln -s /usr/lib/pericia-sim/pericia-sim "$pkgdir/usr/bin/pericia-sim"
+  install -Dm644 packaging/pericia-sim.png "$pkgdir/usr/share/icons/hicolor/256x256/apps/pericia-sim.png"
+  sed -e "s|@BIN@|/usr/bin/pericia-sim|" -e "s|@ICON@|pericia-sim|" packaging/pericia-sim.desktop | install -Dm644 /dev/stdin "$pkgdir/usr/share/applications/pericia-sim.desktop"
+  install -Dm644 crates/app/assets/DEJAVU-LICENSE.txt "$pkgdir/usr/share/licenses/$pkgname/DEJAVU-LICENSE.txt"
+}

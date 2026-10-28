@@ -1,0 +1,10 @@
+[Desktop Entry]
+Type=Application
+Name=Perícia Sim
+GenericName=Simulador de Informática Forense
+Comment=Treinamento em perícia de informática (POPs SENASP vol. 5)
+Exec=@BIN@
+Icon=@ICON@
+Terminal=false
+Categories=Education;Science;
+Keywords=perícia;forense;simulador;treinamento;

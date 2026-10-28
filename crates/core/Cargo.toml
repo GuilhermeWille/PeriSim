@@ -1,0 +1,10 @@
+[package]
+name = "pericia_core"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+description = "Motor do simulador de informática forense: casos, evidências, rede emulada, procedimentos POP, auditoria e documentos."
+
+[dependencies]
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
