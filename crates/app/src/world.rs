@@ -79,6 +79,11 @@ pub fn build(r: &mut Renderer, sim: &Sim, selected: Option<&str>, hover: Option<
     }
     let n = visible.len().max(1) as f32;
     let mut item_spots: Vec<(String, Vec3, Vec3, Vec3)> = vec![];
+    // mídia avulsa (HD externo, pendrive, cartão) ligada ao bloqueador: fica ao lado dele,
+    // depois das mídias retiradas de dentro dos equipamentos
+    let tools_at = crate::parts::station_layout(local).1;
+    let media_at = |k: usize| if local { tools_at + vec3(-0.2, 0.0, -0.2 + 0.2 * k as f32) } else { tools_at + vec3(0.36 + 0.2 * k as f32, 0.0, -0.1) };
+    let mut k_avulsa = sim.equip.removed.len();
     for (k, it) in visible.iter().enumerate() {
         let x = -span_x / 2.0 + (k as f32 + 0.5) * (span_x / n);
         let mut base = vec3(x, surface_y, base_z);
@@ -87,6 +92,10 @@ pub fn build(r: &mut Renderer, sim: &Sim, selected: Option<&str>, hover: Option<
         }
         if local && it.kind.is_computer() && !it.power_on && it.id != "ITEM-01" {
             base = vec3(-1.25, 0.0, -1.75); // gabinete no piso, ao lado da mesa (dá para dar a volta)
+        }
+        if it.slots.is_empty() && it.media.len() == 1 && sim.equip.linked.contains_key(&it.media[0]) && !it.kind.is_computer() && it.phone.is_none() {
+            base = media_at(k_avulsa);
+            k_avulsa += 1;
         }
         let half = draw_item(r, sim, it, base);
         r.shadow(base, half);
@@ -104,7 +113,6 @@ pub fn build(r: &mut Renderer, sim: &Sim, selected: Option<&str>, hover: Option<
     decor(r, local, &mut w, sim);
     vestigios(r, sim, &mut w, &item_spots, local, selected, hover);
     // bloqueador de escrita: na bancada de exame (laboratório) ou na mesa da estação portátil (local)
-    let tools_at = if local { vec3(2.17, 0.75, -2.52) } else { vec3(-0.9, 0.905, 0.0) };
     let wb_on = sim.hashes.keys().any(|k| k.starts_with("wb:"));
     tool_writeblocker(r, tools_at, wb_on);
     w.picks.push(Pick { id: "TOOL-WB".into(), center: tools_at + vec3(0.0, 0.035, 0.0), half: vec3(0.112, 0.037, 0.072), label: "Bloqueador de escrita".into() });
@@ -117,23 +125,21 @@ pub fn build(r: &mut Renderer, sim: &Sim, selected: Option<&str>, hover: Option<
     }
     let porta_bloq = |nome: &str| bparts.iter().find(|x| x.nome == nome).map(|x| tools_at + x.c).unwrap_or(tools_at);
     // porta USB frontal do gabinete da estação (destino do cabo do bloqueador)
-    let est_c = if local { vec3(2.7, 0.0, -2.6) } else { vec3(-1.6, 0.0, -2.6) };
-    let est_usb = crate::parts::station_usb(est_c);
+    let est_usb = crate::parts::station_usb(local);
     let est_part = crate::parts::Parte { nome: "usb".into(), c: Vec3::ZERO, half: vec3(0.02, 0.012, 0.01), tipo: crate::parts::Tipo::Porta };
     draw_parts(r, &mut w, crate::parts::ESTACAO, est_usb, &[est_part], hover);
     let eq = &sim.equip;
     // mídias retiradas e cadeia montada, ao lado do bloqueador (cada mídia é um alvo "M:<id>")
-    let media_at = |k: usize| if local { tools_at + vec3(0.0, 0.0, -0.25 - 0.15 * k as f32) } else { tools_at + vec3(0.22 + 0.2 * k as f32, 0.0, -0.12) };
     let mut k = 0usize;
     // só as retiradas de dentro de um equipamento; as avulsas (HD externo, pendrive) ficam onde estão
     for mid in eq.removed.iter() {
         let at = media_at(k);
         let mk = sim.case.media.iter().find(|m| &m.id == mid).map(|m| m.kind);
         match mk {
-            Some(MediaKind::Hdd) => hdd(r, at + vec3(0.0, 0.013, 0.0), false),
+            Some(MediaKind::Hdd) => hdd_y(r, at + vec3(0.0, 0.013, 0.0), false, std::f32::consts::PI),
             Some(MediaKind::Nvme) => nvme(r, at + vec3(0.0, 0.002, 0.0)),
             _ => {
-                r.model("ssd_25", at, 0.0, &[]);
+                r.model("ssd_25", at, std::f32::consts::PI, &[]);
             }
         }
         let mparts = crate::parts::media_parts(mk);
@@ -639,30 +645,37 @@ fn monitor(r: &mut Renderer, at: Vec3, screen: M, scale: f32) {
     r.panel(vec3(at.x - hx, y1, z), vec3(at.x + hx, y1, z), vec3(at.x + hx, y0, z), vec3(at.x - hx, y0, z), vec3(0.0, 0.0, 1.0), screen, false);
 }
 
-/// Estação pericial completa: mesa, monitor com a tela capturada, gabinete, teclado, mouse.
-pub fn workstation(r: &mut Renderer, c: Vec3, w: &mut World) {
-    if !r.model("mesa_estacao", c, 0.0, &[]) {
-        table(r, c, vec3(1.5, 0.75, 0.75), m(Tex::Wood, rgb(230, 220, 205), 0.9, 0.35), metal(rgb(70, 72, 78)));
-    }
-    let top = c.y + 0.75;
-    monitor(r, vec3(c.x, top, c.z - 0.18), emis(Tex::Desktop, WHITE), 1.15);
-    if r.model("gabinete_pc", vec3(c.x + 0.58, top, c.z - 0.05), 0.0, &[]) {
-        r.bx(vec3(c.x + 0.63, top + 0.415, c.z + 0.183), vec3(0.01, 0.01, 0.003), glow(rgb(60, 220, 120)));
+/// Estação pericial: notebook de perícia (a tela mostra a área de trabalho capturada), mouse
+/// e, no local de busca, a mesa de apoio com cadeira; no laboratório, uma mesa encostada na
+/// ponta da bancada de exame, para que a mídia, o bloqueador e o notebook fiquem juntos.
+pub fn workstation(r: &mut Renderer, local: bool, w: &mut World) {
+    let (nb, _) = crate::parts::station_layout(local);
+    if local {
+        let c = vec3(2.7, 0.0, -2.6);
+        if !r.model("mesa_estacao", c, 0.0, &[]) {
+            table(r, c, vec3(1.5, 0.75, 0.75), m(Tex::Wood, rgb(230, 220, 205), 0.9, 0.35), metal(rgb(70, 72, 78)));
+        }
+        chair(r, vec3(c.x + 0.1, 0.0, c.z + 0.7), 0.0);
+        w.colliders.push(col((c.x - 0.78, c.z - 0.4), (c.x + 0.78, c.z + 0.4)));
     } else {
-        r.bx(vec3(c.x + 0.58, top + 0.23, c.z - 0.05), vec3(0.2, 0.46, 0.44), plastic(rgb(48, 50, 56)));
-        r.bx(vec3(c.x + 0.58, top + 0.23, c.z + 0.171), vec3(0.17, 0.42, 0.003), m(Tex::Vent, WHITE, 0.08, 0.2));
-        r.bx(vec3(c.x + 0.52, top + 0.42, c.z + 0.174), vec3(0.012, 0.012, 0.003), glow(rgb(60, 220, 120)));
+        let c = vec3(-1.85, 0.0, -0.45);
+        table(r, c, vec3(1.0, 0.905, 0.7), m(Tex::Mat, rgb(120, 200, 180), 0.5, 0.1), metal(rgb(170, 176, 182)));
+        w.colliders.push(col((c.x - 0.52, c.z - 0.37), (c.x + 0.52, c.z + 0.37)));
     }
-    if !r.model("teclado", vec3(c.x - 0.02, top, c.z + 0.17), 0.0, &[]) {
-        r.bx(vec3(c.x - 0.02, top + 0.012, c.z + 0.17), vec3(0.44, 0.022, 0.14), m(Tex::Keyboard, WHITE, 0.07, 0.2));
+    let tela = emis(Tex::Desktop, WHITE);
+    if !r.model("notebook", nb, 0.0, &[("tela", tela)]) {
+        let body = metal(rgb(60, 64, 72));
+        r.bx(nb + vec3(0.0, 0.011, 0.0), vec3(0.34, 0.02, 0.24), body);
+        r.bx(nb + vec3(0.0, 0.0215, 0.02), vec3(0.28, 0.001, 0.11), m(Tex::Keyboard, WHITE, 0.06, 0.2));
+        r.slab_tilt(nb + vec3(0.0, 0.021, -0.118), 0.34, 0.22, 0.008, 0.25, body, tela);
     }
-    if !r.model("mouse", vec3(c.x + 0.32, top, c.z + 0.18), 0.0, &[]) {
-        r.bx(vec3(c.x + 0.32, top + 0.012, c.z + 0.18), vec3(0.06, 0.024, 0.1), plastic(rgb(36, 36, 40)));
+    // LED de energia aceso e etiqueta de patrimônio
+    r.bx(nb + vec3(0.15, 0.0215, 0.105), vec3(0.006, 0.001, 0.003), glow(rgb(60, 220, 120)));
+    if !r.model("mouse", nb + vec3(0.27, 0.0, 0.05), 0.0, &[]) {
+        r.bx(nb + vec3(0.27, 0.012, 0.05), vec3(0.06, 0.024, 0.1), plastic(rgb(36, 36, 40)));
     }
-    chair(r, vec3(c.x, 0.0, c.z + 0.7), 0.0);
-    w.colliders.push(col((c.x - 0.78, c.z - 0.4), (c.x + 0.78, c.z + 0.4)));
-    w.picks.push(Pick { id: "STATION".into(), center: vec3(c.x, top + 0.36 * 1.15, c.z - 0.18), half: vec3(0.38, 0.24, 0.06), label: "Estação Pericial — clique para sentar e usar".into() });
-    w.station_seat = (vec3(c.x, 0.0, c.z + 0.85), std::f32::consts::PI);
+    w.picks.push(Pick { id: "STATION".into(), center: nb + vec3(0.0, 0.13, -0.15), half: vec3(0.17, 0.11, 0.05), label: "Estação pericial (notebook) — E para usar".into() });
+    w.station_seat = (vec3(nb.x, 0.0, nb.z + 0.75), std::f32::consts::PI);
 }
 
 fn lab(r: &mut Renderer, w: &mut World) {
@@ -693,8 +706,8 @@ fn lab(r: &mut Renderer, w: &mut World) {
     r.bx(bench_c + vec3(0.8, 1.298, -0.25), vec3(0.12, 0.005, 0.08), glow(rgb(255, 248, 225)));
     }
     w.colliders.push(col((-1.32, -1.0), (1.32, 0.1)));
-    // estação pericial junto à parede do fundo
-    workstation(r, vec3(-1.6, 0.0, -2.6), w);
+    // estação pericial (notebook) na mesa encostada na ponta da bancada de exame
+    workstation(r, false, w);
     // armário de evidências e estante
     if r.model("armario_aco", vec3(2.6, 0.0, -2.65), 0.0, &[]) {
         r.bx(vec3(2.6, 1.6, -2.325), vec3(0.3, 0.12, 0.005), m(Tex::Label, WHITE, 0.3, 0.0));
@@ -790,7 +803,7 @@ fn office(r: &mut Renderer, w: &mut World) {
     }
     w.colliders.push(col((-3.15, 2.05), (-2.65, 2.55)));
     // mesa de apoio do perito com a estação portátil
-    workstation(r, vec3(2.7, 0.0, -2.6), w);
+    workstation(r, true, w);
     // mesa de apoio do perito = bancada de ferramentas do local
     let (bc, bl, bd) = crate::bench::bench_geom(true);
     table(r, vec3(bc.x, 0.0, bc.z), vec3(bl, bc.y, bd), metal(rgb(150, 154, 160)), metal(rgb(90, 92, 98)));
@@ -833,11 +846,11 @@ fn draw_item(r: &mut Renderer, sim: &Sim, it: &Item, base: Vec3) -> Vec3 {
         ItemKind::Notebook => notebook(r, sim, it, base),
         ItemKind::Celular | ItemKind::Tablet => phone(r, it, base),
         ItemKind::Hdd => {
-            hdd(r, base + vec3(0.0, 0.013, 0.0), it.seal.as_ref().map(|s| s.intact).unwrap_or(false));
+            hdd_y(r, base + vec3(0.0, 0.013, 0.0), it.seal.as_ref().map(|s| s.intact).unwrap_or(false), std::f32::consts::PI);
             vec3(0.06, 0.03, 0.08)
         }
         ItemKind::Ssd => {
-            if !r.model("ssd_25", base, 0.0, &[]) {
+            if !r.model("ssd_25", base, std::f32::consts::PI, &[]) {
                 r.bx(base + vec3(0.0, 0.0035, 0.0), vec3(0.07, 0.007, 0.1), metal(rgb(60, 64, 72)));
                 r.bx(base + vec3(0.0, 0.0072, 0.0), vec3(0.06, 0.0005, 0.07), m(Tex::Label, WHITE, 0.07, 0.0));
             }
@@ -869,15 +882,19 @@ fn seal(r: &mut Renderer, c: Vec3, size: Vec3, intact: bool) {
 }
 
 fn hdd(r: &mut Renderer, at: Vec3, sealed: bool) {
-    if r.model("hd_35", at - vec3(0.0, 0.013, 0.0), 0.0, &[]) {
+    hdd_y(r, at, sealed, 0.0);
+}
+
+/// Disco de 3,5": `yaw` = π deixa o conector virado para +z (para o perito, na mesa).
+fn hdd_y(r: &mut Renderer, at: Vec3, sealed: bool, yaw: f32) {
+    let zf = if yaw.abs() > 1.0 { -1.0 } else { 1.0 };
+    if r.model("hd_35", at - vec3(0.0, 0.013, 0.0), yaw, &[]) {
         if sealed {
-            {
             // lacre na largura exata do disco, dobrado pelas laterais
-            seal(r, at + vec3(0.0, 0.0142, -0.02), vec3(0.1032, 0.0006, 0.02), true);
+            seal(r, at + vec3(0.0, 0.0142, -0.02 * zf), vec3(0.1032, 0.0006, 0.02), true);
             for sx in [-1.0f32, 1.0] {
-                seal(r, at + vec3(sx * 0.0516, 0.0072, -0.02), vec3(0.0006, 0.014, 0.02), true);
+                seal(r, at + vec3(sx * 0.0516, 0.0072, -0.02 * zf), vec3(0.0006, 0.014, 0.02), true);
             }
-        }
         }
         return;
     }
@@ -1149,7 +1166,7 @@ fn media_port_world(sim: &Sim, mid: &str, w: &World) -> Option<Vec3> {
 /// piso, corre por ele e sobe.
 pub fn cabo(r: &mut Renderer, a: Vec3, b: Vec3, raio: f32, mt: M) {
     let horiz = vec2(b.x - a.x, b.z - a.z).length();
-    let pts: Vec<Vec3> = if horiz > 0.9 {
+    let pts: Vec<Vec3> = if horiz > 0.9 && (a.y - b.y).abs() > 0.3 {
         let dir = vec2(b.x - a.x, b.z - a.z).normalize_or_zero();
         let a1 = a + vec3(dir.x * 0.06, 0.0, dir.y * 0.06);
         let b1 = b - vec3(dir.x * 0.06, 0.0, dir.y * 0.06);

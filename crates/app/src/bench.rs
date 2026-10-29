@@ -42,7 +42,7 @@ pub fn surfaces(local: bool) -> Vec<Surface> {
         v.push(Surface { min: vec2(2.0, -2.92), max: vec2(3.4, -2.28), y: 0.75 }); // mesa da estação
     } else {
         v.push(Surface { min: vec2(-1.25, -0.95), max: vec2(1.25, 0.05), y: 0.905 }); // bancada de exame
-        v.push(Surface { min: vec2(-2.3, -2.92), max: vec2(-0.9, -2.28), y: 0.75 }); // mesa da estação
+        v.push(Surface { min: vec2(-2.32, -0.77), max: vec2(-1.38, -0.13), y: 0.905 }); // mesa da estação (ponta da bancada)
     }
     v
 }
@@ -109,6 +109,9 @@ pub fn transform(r: &Renderer, id: &str, pos: Vec3, yaw: f32) -> Mat4 {
     Mat4::from_translation(pos + vec3(0.0, lift, 0.0)) * rot
 }
 
+/// Versão da arrumação gravada (2 = fileiras por etapa do procedimento, v0.12).
+const FORMATO: u64 = 2;
+
 #[derive(Default)]
 pub struct Bench {
     /// Posições por cenário: id → (ponto no tampo, giro).
@@ -134,6 +137,10 @@ impl Bench {
         self.loaded = true;
         let Ok(s) = std::fs::read_to_string(path()) else { return };
         let Ok(v) = serde_json::from_str::<Value>(&s) else { return };
+        // arrumações de versões anteriores (outra disposição da bancada) são refeitas
+        if v["formato"].as_u64().unwrap_or(1) < FORMATO {
+            return;
+        }
         for (key, local) in [("lab", false), ("local", true)] {
             if let Some(o) = v[key].as_object() {
                 for (id, p) in o {
@@ -155,7 +162,7 @@ impl Bench {
             Value::Object(o)
         };
         let _ = std::fs::create_dir_all(save::data_dir().join("saves"));
-        let _ = save::write_atomic(&path(), json!({"formato": 1, "lab": enc(&self.lab), "local": enc(&self.local)}).to_string().as_bytes());
+        let _ = save::write_atomic(&path(), json!({"formato": FORMATO, "lab": enc(&self.lab), "local": enc(&self.local)}).to_string().as_bytes());
     }
 
     /// Garante uma posição para cada item; o que faltar é arrumado em fileiras na bancada.
@@ -196,15 +203,17 @@ impl Bench {
     }
 }
 
-/// Arrumação original: três fileiras (fundo: itens grandes e planos; meio: câmera, cabos e
-/// bateria; frente: ferramentas pequenas), espaçadas pela largura real de cada modelo.
+/// Arrumação original, por etapa do procedimento e da esquerda para a direita: fundo —
+/// documentação e acondicionamento; meio — registro, inspeção e isolamento; frente —
+/// ferramentas de mão, depois os cabos e adaptadores de conexão. Espaçadas pela largura real
+/// de cada modelo, todas com a mesma orientação.
 pub fn default_layout(r: &Renderer, local: bool) -> Vec<(&'static str, (Vec3, f32))> {
     let (c, l, d) = bench_geom(local);
     // (itens, distância do centro do tampo em direção à parede, em metros, para 0,6 m de fundo)
     let rows: [(&[&'static str], f32); 3] = [
-        (&["oficio", "saco", "faraday", "etiquetas", LUVAS, "fita-lacre", "placas"], 0.145),
-        (&["camera", "bateria", "cabo-sata", "cabo-usb", "cabo-usbc", "cabo-lightning", "aluminio", PULSEIRA, "lanterna"], -0.08),
-        (&["chave", "tesoura", "ejetor", "pendrive-coleta", "adaptador-m2", "leitor-sd"], -0.225),
+        (&[LUVAS, "oficio", "etiquetas", "placas", "fita-lacre", "saco"], 0.145),
+        (&[PULSEIRA, "camera", "lanterna", "faraday", "aluminio", "bateria"], -0.06),
+        (&["chave", "tesoura", "ejetor", "pendrive-coleta", "cabo-sata", "cabo-usb", "cabo-usbc", "cabo-lightning", "adaptador-m2", "leitor-sd"], -0.215),
     ];
     // compridos de lado (o lado maior acompanha a bancada)
     let extra = |id: &str| if matches!(id, "oficio" | "saco" | "tesoura") { std::f32::consts::FRAC_PI_2 } else { 0.0 };

@@ -21,6 +21,7 @@ mod interact;
 mod config;
 mod steps;
 mod parts;
+mod nivel;
 mod sfx;
 mod video;
 mod maleta;
@@ -192,10 +193,26 @@ impl App {
     }
     pub fn finish_case(&mut self, out: String) {
         self.desk.eval_text = out.clone();
+        let mut toast_xp: Option<String> = None;
         if let Some(s) = &self.sim {
             let ev = pericia_core::assess::evaluate(s);
             let (got, max, destroyed) = pericia_core::assess::total(&ev, s);
             let verdict = if destroyed { "Reprovado (perda de evidência)" } else if got * 100 / max.max(1) >= 70 { "Aprovado" } else { "Reprovado" };
+            let antes = save::history();
+            let p0 = nivel::perfil(&antes);
+            let ganho = nivel::ganho(&antes, &s.case.id, s.case.difficulty, verdict == "Aprovado");
+            let p1n = p0.nivel + ganho;
+            let linha = if ganho > 0 {
+                let novo = nivel::titulo(p1n);
+                let sobe = if novo != p0.titulo { format!(" Novo título: {}!", novo) } else { String::new() };
+                format!("EXPERIÊNCIA: +{} nível(is) (dificuldade {}) → nível {} · {}.{}\n\n", ganho, s.case.difficulty, p1n, novo, sobe)
+            } else if verdict == "Aprovado" {
+                format!("EXPERIÊNCIA: caso já aprovado antes — não soma de novo. Nível {} · {}.\n\n", p0.nivel, p0.titulo)
+            } else {
+                format!("EXPERIÊNCIA: só casos aprovados somam níveis. Nível {} · {}.\n\n", p0.nivel, p0.titulo)
+            };
+            self.desk.eval_text = format!("{}{}", linha, self.desk.eval_text);
+            toast_xp = Some(linha.trim().to_string());
             save::push_history(save::HistoryEntry {
                 id: s.case.id.clone(),
                 module: s.case.module.code().into(),
@@ -208,6 +225,9 @@ impl App {
             let _ = save::export(s);
         }
         self.history = save::history();
+        if let Some(t) = toast_xp {
+            self.toast(&t);
+        }
         self.desk.app = DApp::Avaliacao;
         self.desk.scroll = 0.0;
     }
@@ -402,6 +422,22 @@ fn draw_menu(app: &mut App) {
     let col2 = rect(col1.x + col1.w + 16.0 * s, col1.y, w - col1.w - 112.0 * s, col1.h);
     app.ui.frame(col2, T.panel, T.border);
     let mut y = col2.y + 26.0 * s;
+    // nível do perito: só títulos, de Novato a Expert
+    let pf = nivel::perfil(&app.history);
+    app.ui.text(&format!("Nível {} · {}", pf.nivel, pf.titulo), col2.x + 16.0 * s, y, 16.0, F::Bold, T.highlight);
+    y += 12.0 * s;
+    let bar = rect(col2.x + 16.0 * s, y, col2.w - 32.0 * s, 8.0 * s);
+    draw_rectangle(bar.x, bar.y, bar.w, bar.h, T.panel2);
+    let (frac, prox) = match pf.proximo {
+        Some((t, n)) => (((pf.nivel - pf.inicio) as f32 / (n - pf.inicio).max(1) as f32).clamp(0.0, 1.0), format!("faltam {} nível(is) para {}", n - pf.nivel, t)),
+        None => (1.0, "título máximo".to_string()),
+    };
+    draw_rectangle(bar.x, bar.y, bar.w * frac, bar.h, T.ok);
+    y += 26.0 * s;
+    app.ui.text(&format!("{} · {} caso(s) aprovado(s)", prox, pf.casos), col2.x + 16.0 * s, y, 11.5, F::Reg, T.dim);
+    y += 16.0 * s;
+    app.ui.text("Cada caso aprovado vale a sua dificuldade (1 a 4) — só títulos, de Novato a Expert.", col2.x + 16.0 * s, y, 10.5, F::Reg, T.dim);
+    y += 28.0 * s;
     app.ui.text("Casos concluídos", col2.x + 16.0 * s, y, 14.0, F::Bold, T.text);
     y += 16.0 * s;
     if app.history.is_empty() {
@@ -914,6 +950,24 @@ fn hardware_inner(app: &mut App, area: Rect, modal: bool) {
         let rr = rect(at.x, at.y, tw, 24.0 * s);
         app.ui.frame(rr, Color::new(0.0, 0.0, 0.0, 0.75), if near { T.highlight } else { T.border });
         app.ui.text(&txt, rr.x + 9.0 * s, rr.y + 16.5 * s, 12.5, F::Reg, if near { T.text } else { T.dim });
+    }
+    // ferramenta na mão e mira num tampo livre: mostra onde ela fica com G
+    if best.is_none() && !modal && app.exam.is_none() && app.cabo.is_none() {
+        if let Some(sm) = app.sim.as_ref().filter(|x| x.equip.hand.is_some()) {
+            let lc = sm.case.setting == Setting::Local;
+            if let Some(pp) = bench::place_ray(o, d, lc, REACH) {
+                if let Some(sp) = world::project(&cam, view, pp) {
+                    let rr = 9.0 * s;
+                    draw_circle_lines(sp.x, sp.y, rr + 1.5, 2.0, Color::new(0.0, 0.0, 0.0, 0.5));
+                    draw_circle_lines(sp.x, sp.y, rr, 2.0, Color::new(0.55, 0.85, 1.0, 0.9));
+                    let txt = "[G] largar aqui";
+                    let tw = app.ui.measure(txt, 12.0, F::Reg) + 16.0 * s;
+                    let at = rect(cc.x - tw / 2.0, cc.y + 22.0 * s, tw, 22.0 * s);
+                    app.ui.frame(at, Color::new(0.0, 0.0, 0.0, 0.7), T.border);
+                    app.ui.text(txt, at.x + 8.0 * s, at.y + 15.5 * s, 12.0, F::Reg, T.text);
+                }
+            }
+        }
     }
     let clicked = if app.player.captured {
         let c = app.ui.clicked && !app.ui.click_consumed;
@@ -1706,6 +1760,7 @@ fn run_script(app: &mut App, sc: &mut Script) -> bool {
                 "nav" => linuxde::WinKind::Navegador,
                 "doc" => linuxde::WinKind::Documento,
                 "caso" => linuxde::WinKind::Caso,
+                "ajuda" => linuxde::WinKind::Atalhos,
                 "linha" => linuxde::WinKind::Linha,
                 "aval" => linuxde::WinKind::Avaliacao,
                 "evid" => linuxde::WinKind::Evidencias,

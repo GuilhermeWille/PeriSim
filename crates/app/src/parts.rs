@@ -288,13 +288,14 @@ pub fn item_parts(sim: &Sim, it: &Item) -> Vec<Parte> {
                 v.push(p("lacre", vec3(0.0, 0.0345, 0.0), vec3(w * 0.85, 0.005, 0.01), Tipo::Lacre));
             }
         }
+        // discos avulsos ficam com o conector virado para o perito (+z)
         ItemKind::Hdd => {
-            v.push(p("porta", vec3(0.0, 0.011, -0.078), vec3(0.04, 0.011, 0.01), Tipo::Porta));
+            v.push(p("porta", vec3(0.0, 0.011, 0.078), vec3(0.04, 0.011, 0.01), Tipo::Porta));
             if it.seal.is_some() {
-                v.push(p("lacre", vec3(0.0, 0.0272, -0.02), vec3(0.052, 0.004, 0.012), Tipo::Lacre));
+                v.push(p("lacre", vec3(0.0, 0.0272, 0.02), vec3(0.052, 0.004, 0.012), Tipo::Lacre));
             }
         }
-        ItemKind::Ssd => v.push(p("porta", vec3(0.0, 0.0035, -0.055), vec3(0.03, 0.007, 0.008), Tipo::Porta)),
+        ItemKind::Ssd => v.push(p("porta", vec3(0.0, 0.0035, 0.055), vec3(0.03, 0.007, 0.008), Tipo::Porta)),
         ItemKind::Nvme => v.push(p("porta", vec3(-0.04, 0.002, 0.0), vec3(0.007, 0.006, 0.012), Tipo::Porta)),
         ItemKind::Pendrive => v.push(p("porta", vec3(0.037, 0.006, 0.0), vec3(0.012, 0.008, 0.01), Tipo::Porta)),
         ItemKind::CartaoSd => v.push(p("porta", vec3(0.0, 0.0012, -0.006), vec3(0.009, 0.005, 0.006), Tipo::Porta)),
@@ -302,12 +303,12 @@ pub fn item_parts(sim: &Sim, it: &Item) -> Vec<Parte> {
     v
 }
 
-/// Partes de uma mídia retirada (desenhada em `at` na mesa, conector para -z).
+/// Partes de uma mídia retirada (desenhada em `at` na mesa, conector virado para o perito, +z).
 pub fn media_parts(kind: Option<MediaKind>) -> Vec<Parte> {
     vec![match kind {
-        Some(MediaKind::Hdd) => p("porta", vec3(0.0, 0.011, -0.078), vec3(0.04, 0.011, 0.01), Tipo::Porta),
+        Some(MediaKind::Hdd) => p("porta", vec3(0.0, 0.011, 0.078), vec3(0.04, 0.011, 0.01), Tipo::Porta),
         Some(MediaKind::Nvme) => p("porta", vec3(-0.04, 0.002, 0.0), vec3(0.008, 0.007, 0.013), Tipo::Porta),
-        _ => p("porta", vec3(0.0, 0.0035, -0.055), vec3(0.03, 0.007, 0.008), Tipo::Porta),
+        _ => p("porta", vec3(0.0, 0.0035, 0.055), vec3(0.03, 0.007, 0.008), Tipo::Porta),
     }]
 }
 
@@ -334,9 +335,22 @@ pub fn blocker_parts(on: bool) -> Vec<Parte> {
     ]
 }
 
-/// Porta USB frontal do gabinete da estação (relativa ao centro `c` da mesa da estação).
-pub fn station_usb(c: Vec3) -> Vec3 {
-    vec3(c.x + 0.59, c.y + 0.75 + 0.415, c.z - 0.05 + 0.235)
+/// Estação pericial (um notebook de perícia): (base do notebook, posição do bloqueador).
+/// No laboratório fica numa mesa encostada na ponta da bancada de exame; no local de busca,
+/// na mesa de apoio do perito — em ambos, a um palmo do bloqueador.
+pub fn station_layout(local: bool) -> (Vec3, Vec3) {
+    if local {
+        (vec3(2.98, 0.75, -2.68), vec3(2.32, 0.75, -2.55))
+    } else {
+        (vec3(-1.98, 0.905, -0.58), vec3(-1.52, 0.905, -0.32))
+    }
+}
+
+/// Porta USB lateral do notebook da estação, do lado virado para o bloqueador.
+pub fn station_usb(local: bool) -> Vec3 {
+    let (nb, wb) = station_layout(local);
+    let lado = if wb.x >= nb.x { 1.0 } else { -1.0 };
+    nb + vec3(lado * 0.172, 0.009, 0.03)
 }
 
 /// O item tem essa parte agora? (Senão a etapa fica no objeto inteiro.)

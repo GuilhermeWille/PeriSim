@@ -70,8 +70,8 @@ Na página **Releases** do repositório há um pacote por sistema:
 ## Executar (Linux x86_64)
 
 ```bash
-tar xzf pericia-sim-0.11.0-linux-x86_64.tar.gz
-cd pericia-sim-0.11.0-linux-x86_64
+tar xzf pericia-sim-0.12.0-linux-x86_64.tar.gz
+cd pericia-sim-0.12.0-linux-x86_64
 ./pericia-sim          # rodar direto
 ./install.sh           # ou instalar no menu de aplicativos (sem sudo)
 ```
@@ -107,17 +107,19 @@ No Windows e no macOS o mesmo comando gera o executável nativo (`target/release
 1. No menu, escolha o **POP**, a **dificuldade** (comece por *1 · Guiado*) e clique em **Iniciar novo caso**. Para repetir um caso, digite o ID (ex.: `C501-D2-00000007`).
 2. Ajuste volume e controles em **⚙ Configurações**, se quiser. Leia o caso: tecla **T** (tablet → **Missão**) ou, na Estação, aplicativo **Caso**. O mentor fica no tablet, em **Apoio**.
 3. No **Ambiente**: **WASD** anda (Shift corre), olhe com o **mouse** (travado no centro; o ponto é a mira). **Esc** ou **Tab** soltam o mouse e um clique na cena trava de novo; ele fica livre sozinho no tablet, no quadro, no celular e na estação. **+ / −** ajustam a sensibilidade (também em *Configurações → Controles*, de 0,1× a 5×).
-   * **Bancada de ferramentas** (laboratório: junto à parede da frente; local de busca: a mesa de apoio): cada ferramenta, a caixa de luvas e a pulseira são objetos soltos. **E** pega, **G** larga a ferramenta da mão onde você mirar (bancada, mesa de exame ou mesa da estação) — organize como quiser, a arrumação fica salva.
+   * **Bancada de ferramentas** (laboratório: junto à parede da frente; local de busca: a mesa de apoio): cada ferramenta, a caixa de luvas e a pulseira são objetos soltos, arrumados em fileiras por etapa do procedimento (fundo: documentação e acondicionamento; meio: registro e isolamento; frente: ferramentas de mão e cabos). **E** pega, **G** larga a ferramenta da mão onde você mirar — na bancada de ferramentas, na bancada de trabalho (exame) ou na mesa da estação; com uma ferramenta na mão, um círculo e "[G] largar aqui" mostram onde ela vai ficar. Organize como quiser, a arrumação fica salva.
+   * **Estação pericial**: um notebook de perícia ao lado do bloqueador — no laboratório, numa mesa encostada na ponta da bancada de exame; no local de busca, na mesa de apoio. A mídia ligada ao bloqueador fica junto dele, e os cabos ficam curtos, sobre a mesa.
    * **Usar, peça por peça**: com a ferramenta certa na mão, mire **a peça** e aperte **E**. Cada parafuso da tampa (na traseira do gabinete; embaixo do notebook, que fica fechado e virado depois de desligado e inspecionado), a tampa, o lacre, o botão de energia, a porta USB, a porta de rede, o conector de dados e o de energia de cada disco, cada parafuso do suporte e a própria mídia são alvos separados — o parafuso sai e some, o cabo desconectado fica solto. No celular: a porta de dados/carga, a gaveta do chip e a câmera frontal. Fotografar, inspecionar, isolar e embalar continuam no objeto inteiro. Fora de ordem, o jogo diz qual etapa falta, com que ferramenta e **em qual peça**. Com uma ferramenta na mão, **losangos amarelos** marcam cada peça onde ela serve agora.
    * **Cabos, de porta a porta**: **E** no conector da mídia e depois **E** na porta certa do bloqueador (SATA, M.2, leitor SD ou entrada USB, na traseira e na lateral); o cabo USB vai da saída do bloqueador à porta USB frontal do gabinete da estação. A chave de proteção contra escrita fica em cima do bloqueador. Os cabos ligados aparecem na cena, de ponta a ponta.
    * **Painel de tarefas** (canto superior esquerdo, semitransparente): o objetivo marcado e as etapas do objeto em foco, com a ferramenta de cada uma. **O** mostra/oculta.
    * **Examinar**: **F** aproxima a câmera do objeto (o mouse gira, a roda aproxima) e mostra o que está escrito nele — fabricante, nº de série, lacre, IMEI, estado. No celular, **Enter** mostra a tela.
    * **Objetivo**: no tablet → **Objeto**, cada objeto tem a lista de etapas na ordem; clique numa para marcá-la — ela aparece discretamente no canto da tela, com a ferramenta, e avança sozinha.
 4. Adquira a mídia (bloqueador → imagem → verificar hash) ou extraia o celular.
-5. Vá até a **Estação Pericial** e clique no monitor (ou use a aba no topo) — a sessão já abre com um terminal. Para voltar, **◄ Levantar da estação**. No Terminal: `lsblk`, `pericia imagem m-01`, `sudo mkdir -p /mnt/m01`, `sudo mount -o ro,loop ~/casos/<ID>/M-01.dd /mnt/m01`, `grep -ril <termo> /mnt/m01`, `stat`, `sha256sum`. Use também **Arquivos**, **Navegador** e **Linha do tempo** (menu *Aplicativos*).
+5. Vá até a **Estação Pericial** (o notebook) e clique na tela (ou use a aba no topo) — a sessão já abre com um terminal. Para voltar, **◄ Levantar da estação**. No Terminal: `lsblk`, `pericia imagem m-01`, `sudo mkdir -p /mnt/m01`, `sudo mount -o ro,loop ~/casos/<ID>/M-01.dd /mnt/m01`, `grep -ril <termo> /mnt/m01`, `stat`, `sha256sum`. Use também **Arquivos**, **Navegador** e **Linha do tempo** (menu *Aplicativos*). Na dúvida, **F1** (ou o botão **? Comandos e atalhos** no painel, ou o ícone na área de trabalho) abre a ajuda com os comandos na ordem do trabalho, já com os nomes do caso, e os atalhos de teclado; um clique num comando o leva ao terminal para completar e apertar Enter.
 6. Quando achar a expressão, registre com `achei <expressão>`; no **Documento**, use *Pré‑preencher*, revise, escreva a conclusão separando fato de inferência, *Verificar coerência* e *Emitir e finalizar*.
 7. **Quadro de provas** (parede esquerda, ou mire nele e aperte E): cada foto tirada com a câmera na cena vira uma foto de verdade no quadro; acrescente bilhetes, anotações do tablet e ligue tudo com barbante vermelho. O quadro também aparece na parede, em 3D.
 8. Leia a **Avaliação**: cada ponto perdido traz o motivo.
+9. **Nível do perito** (no menu inicial): cada caso aprovado soma tantos níveis quanto a sua dificuldade (1 a 4), uma vez por caso. O nível só dá títulos — Novato, Aprendiz, Perito em formação, Perito júnior, Perito, Perito sênior, Especialista e Expert —, nunca vantagens. É calculado do histórico de casos concluídos, então os casos de versões anteriores também contam.
 
 O terminal do simulador fica oculto: **F2** (ou **'**) abre e fecha, **Esc** ou **✕ Fechar** escondem. Atalhos do terminal: ↑/↓ histórico, `limpar`, Ctrl+V cola. No editor e nos campos do documento: setas, Home/End, Delete e clique posicionam o cursor.
 

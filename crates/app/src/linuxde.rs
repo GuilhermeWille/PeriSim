@@ -23,6 +23,7 @@ pub enum WinKind {
     Caso,
     Evidencias,
     Avaliacao,
+    Atalhos,
 }
 
 impl WinKind {
@@ -40,6 +41,7 @@ impl WinKind {
             WinKind::Caso => "Caso".into(),
             WinKind::Evidencias => "Visualizador de evidências".into(),
             WinKind::Avaliacao => "Avaliação".into(),
+            WinKind::Atalhos => "Comandos e atalhos — clique num comando para levá-lo ao terminal".into(),
         }
     }
     fn short(self) -> &'static str {
@@ -56,6 +58,7 @@ impl WinKind {
             WinKind::Caso => "Caso",
             WinKind::Evidencias => "Evidências",
             WinKind::Avaliacao => "Avaliação",
+            WinKind::Atalhos => "Ajuda",
         }
     }
 }
@@ -183,6 +186,7 @@ pub fn open(app: &mut App, kind: WinKind) {
         WinKind::Files => (820.0, 480.0),
         WinKind::Editor => (720.0, 480.0),
         WinKind::Documento | WinKind::Navegador | WinKind::Evidencias => (960.0, 560.0),
+        WinKind::Atalhos => (900.0, 580.0),
         _ => (720.0, 480.0),
     };
     let id = app.de.next_id;
@@ -458,6 +462,15 @@ fn top_panel(app: &mut App, area: Rect, h: f32) {
             }
         }
     }
+    // ajuda sempre à mão: comandos e atalhos (também F1)
+    let hb = Rect::new(x.max(area.x + area.w * 0.5), area.y + 3.0 * s, 0.0, h - 6.0 * s);
+    let hl = "? Comandos e atalhos (F1)";
+    let hb = Rect::new(area.x + area.w - 420.0 * s - app.ui.measure(hl, 12.0, F::Reg), hb.y, app.ui.measure(hl, 12.0, F::Reg) + 18.0 * s, hb.h);
+    app.ui.frame(hb, if app.ui.hover(hb) { T.accent2 } else { Color::new(0.14, 0.30, 0.22, 1.0) }, T.border);
+    app.ui.text(hl, hb.x + 9.0 * s, hb.y + hb.h / 2.0 + 5.0 * s, 12.0, F::Bold, T.text);
+    if app.ui.click_in(hb) || is_key_pressed(KeyCode::F1) {
+        open(app, WinKind::Atalhos);
+    }
     // área de notificação: rede, relógio
     let (clock, date) = app.sim.as_ref().map(|x| (pericia_core::util::fmt_hm(x.clock, pericia_core::util::BRT), pericia_core::util::fmt_date(x.clock, pericia_core::util::BRT))).unwrap_or_default();
     let net = app.sim.as_ref().map(|x| if x.case.net.is_some() { format!("rede do caso ({})", x.net_conn) } else { "sem rede".into() }).unwrap_or_default();
@@ -483,6 +496,7 @@ const MENU: &[(&str, &str, WinKind)] = &[
     ("Perícia", "Cadeia de custódia", WinKind::Custodia),
     ("Perícia", "Documento pericial", WinKind::Documento),
     ("Perícia", "Avaliação", WinKind::Avaliacao),
+    ("Ajuda", "Comandos e atalhos  (F1)", WinKind::Atalhos),
     ("Ajuda", "Manual dos POPs", WinKind::Manual),
     ("Ajuda", "Mentor", WinKind::Mentor),
 ];
@@ -551,6 +565,11 @@ fn icon(app: &Ui, kind: &str, r: Rect) {
                 draw_line(r.x + r.w * 0.25, r.y + r.h * (0.28 + k as f32 * 0.16), r.x + r.w * 0.75, r.y + r.h * (0.28 + k as f32 * 0.16), 1.5 * s, Color::from_rgba(120, 130, 150, 255));
             }
         }
+        "help" => {
+            draw_circle(r.x + r.w / 2.0, r.y + r.h / 2.0, r.w * 0.42, Color::from_rgba(70, 150, 110, 255));
+            draw_circle_lines(r.x + r.w / 2.0, r.y + r.h / 2.0, r.w * 0.42, 1.5, T.text);
+            app.text("?", r.x + r.w * 0.38, r.y + r.h * 0.7, 20.0, F::Bold, T.text);
+        }
         "drive" => {
             draw_rectangle(r.x, r.y + r.h * 0.3, r.w, r.h * 0.45, Color::from_rgba(160, 166, 176, 255));
             draw_circle(r.x + r.w * 0.82, r.y + r.h * 0.52, 2.5 * s, Color::from_rgba(80, 220, 120, 255));
@@ -568,6 +587,7 @@ fn desktop_icons(app: &mut App, desk: Rect, blocked: bool) {
         ("terminal", "Terminal", "term"),
         ("web", "Navegador", "web"),
         ("doc", "LEIA-ME.txt", "readme"),
+        ("help", "Comandos e atalhos", "ajuda"),
         ("doc", "Documento pericial", "laudo"),
         ("folder", "Caso atual", "caso"),
     ];
@@ -599,6 +619,7 @@ fn desktop_icons(app: &mut App, desk: Rect, blocked: bool) {
                     "term" => open(app, WinKind::Terminal(0)),
                     "web" => open(app, WinKind::Navegador),
                     "laudo" => open(app, WinKind::Documento),
+                    "ajuda" => open(app, WinKind::Atalhos),
                     _ => open_in_editor(app, "/home/perito/Área de Trabalho/LEIA-ME.txt"),
                 }
             }
@@ -664,6 +685,7 @@ fn draw_window(app: &mut App, i: usize, r: Rect, is_top: bool) -> Option<u32> {
         WinKind::Documento => desktop::laudo(app, body),
         WinKind::Manual => desktop::manual(app, body),
         WinKind::Evidencias => desktop::evidencias(app, body),
+        WinKind::Atalhos => atalhos(app, i, body),
         WinKind::Caso | WinKind::Mentor | WinKind::Custodia | WinKind::Linha | WinKind::Avaliacao => {
             let txt = app.sim.as_ref().map(|sim| match kind {
                 WinKind::Caso => pericia_core::tools::describe_case(sim),
@@ -1078,4 +1100,180 @@ pub fn capture(app: &mut App, area: Rect) {
     let tex = Texture2D::from_image(&sub);
     tex.set_filter(FilterMode::Linear);
     app.de.snapshot = Some(tex);
+}
+
+// --------------------------------------------------------------------- comandos e atalhos
+
+/// Janela de ajuda: os comandos na ordem do trabalho, com os nomes do caso atual; um clique
+/// leva o comando para o terminal (sem executar), para completar e apertar Enter.
+fn atalhos(app: &mut App, wi: usize, body: Rect) {
+    let (id, m) = app.sim.as_ref().map(|x| (x.case.id.clone(), x.case.media.first().map(|m| m.id.clone()).unwrap_or_else(|| "M-01".into()))).unwrap_or_else(|| ("<ID>".into(), "M-01".into()));
+    let secoes = comandos_ajuda(&id, &m);
+    atalhos_ui(app, wi, body, secoes);
+}
+
+/// Comandos da ajuda, com os nomes do caso (ID e primeira mídia).
+pub fn comandos_ajuda(id: &str, m: &str) -> Vec<(&'static str, Vec<(String, String)>)> {
+    let ml = m.to_lowercase();
+    let mm = format!("/mnt/{}", ml.replace('-', ""));
+    vec![
+        ("Primeiros passos, na ordem", vec![
+            ("pericia caso".into(), "histórico, objetivo e quesitos do caso".into()),
+            ("lsblk".into(), "mídias ligadas à estação (pelo bloqueador)".into()),
+            (format!("pericia imagem {}", ml), "aquisição: gera a imagem forense com hash".into()),
+            (format!("pericia verificar-hash {}", ml), "confere o hash da imagem com o da aquisição".into()),
+            (format!("sudo mkdir -p {}", mm), "cria o ponto de montagem".into()),
+            (format!("sudo mount -o ro,loop ~/casos/{}/{}.dd {}", id, m, mm), "monta a imagem só para leitura".into()),
+            (format!("ls -la {}", mm), "lista o conteúdo, inclusive ocultos".into()),
+            (format!("grep -ril termo {}", mm), "procura um termo em todos os arquivos (troque 'termo')".into()),
+            ("stat arquivo".into(), "datas e tamanho de um arquivo".into()),
+            ("sha256sum arquivo".into(), "hash de um arquivo".into()),
+            ("pericia achei expressão".into(), "registra o que você encontrou (vai para o laudo)".into()),
+            ("pericia anotar texto".into(), "anotação de trabalho".into()),
+            ("pericia laudo".into(), "situação do documento pericial".into()),
+            ("pericia ajuda".into(), "todos os comandos do simulador (recuperar, decifrar, rede…)".into()),
+        ]),
+        ("Navegar e ler arquivos", vec![
+            ("pwd".into(), "onde estou".into()),
+            ("ls -l".into(), "lista a pasta atual".into()),
+            ("cd pasta".into(), "entra numa pasta · cd .. volta · cd ~ vai para a pasta pessoal".into()),
+            ("cat arquivo".into(), "mostra o arquivo inteiro".into()),
+            ("head -n 20 arquivo".into(), "primeiras 20 linhas (tail: últimas)".into()),
+            ("less arquivo".into(), "lê um arquivo longo".into()),
+            ("file arquivo".into(), "tipo real do arquivo (pela assinatura)".into()),
+            (format!("find {} -iname '*.txt'", mm), "procura arquivos pelo nome".into()),
+            ("tree".into(), "árvore de pastas".into()),
+            ("wc -l arquivo".into(), "conta linhas".into()),
+            ("man comando".into(), "manual de um comando".into()),
+        ]),
+        ("Sistema", vec![
+            ("df -h".into(), "espaço e montagens".into()),
+            (format!("sudo umount {}", mm), "desmonta a imagem".into()),
+            ("dmesg".into(), "mensagens do sistema (o que foi conectado)".into()),
+            ("history".into(), "comandos já digitados".into()),
+            ("clear".into(), "limpa a tela".into()),
+        ]),
+    ]
+}
+
+fn atalhos_ui(app: &mut App, wi: usize, body: Rect, secoes: Vec<(&'static str, Vec<(String, String)>)>) {
+    let s = app.ui.scale;
+    let teclas: [(&str, &str); 12] = [
+        ("Tab", "completa o nome do comando ou do caminho"),
+        ("↑ / ↓", "comandos anteriores"),
+        ("Enter", "executa a linha"),
+        ("Ctrl+C", "cancela a linha"),
+        ("Ctrl+L", "limpa o terminal"),
+        ("Ctrl+V", "cola"),
+        ("F1", "abre esta ajuda"),
+        ("Menu Aplicativos", "Terminal, Arquivos, Editor, Navegador, Documento, Linha do tempo…"),
+        ("Título da janela", "arraste para mover · duplo clique maximiza"),
+        ("Canto inferior direito", "arraste para redimensionar · – □ × minimizar, maximizar, fechar"),
+        ("Editor", "Ctrl+S salva (só na pasta pessoal; mídias montadas são só leitura)"),
+        ("◄ Levantar da estação", "volta ao ambiente (canto inferior direito)"),
+    ];
+    let lh = 21.0 * s;
+    let mut total = 0.0;
+    for (_, v) in &secoes {
+        total += 30.0 * s + v.len() as f32 * lh;
+    }
+    total += 30.0 * s + teclas.len() as f32 * lh + 20.0 * s;
+    draw_rectangle(body.x - 6.0 * s, body.y - 6.0 * s, body.w + 12.0 * s, body.h + 12.0 * s, T.panel);
+    let mut sc = app.de.wins[wi].scroll;
+    if body.contains(app.ui.mouse) && app.ui.wheel != 0.0 {
+        sc -= app.ui.wheel * 40.0 * s;
+        app.ui.wheel = 0.0;
+    }
+    sc = sc.clamp(0.0, (total - body.h).max(0.0));
+    app.de.wins[wi].scroll = sc;
+    let mut y = body.y - sc;
+    let col2 = body.x + (body.w * 0.56).max(250.0 * s);
+    let mut escolhido: Option<String> = None;
+    for (titulo, v) in &secoes {
+        y += 22.0 * s;
+        app.ui.text(titulo, body.x + 4.0 * s, y, 13.0, F::Bold, T.highlight);
+        y += 8.0 * s;
+        for (c, d) in v {
+            let r = Rect::new(body.x, y, body.w, lh);
+            let vis = r.y + r.h > body.y && r.y < body.y + body.h;
+            if vis && app.ui.hover(r) {
+                draw_rectangle(r.x, r.y, r.w, r.h, Color::new(1.0, 1.0, 1.0, 0.07));
+            }
+            let cw = col2 - body.x - 16.0 * s;
+            let ct = crate::phone::clip_text(&app.ui, c, 11.5, F::Mono, cw);
+            app.ui.text(&ct, body.x + 8.0 * s, y + 15.0 * s, 11.5, F::Mono, T.term_fg);
+            let dt = crate::phone::clip_text(&app.ui, d, 11.5, F::Reg, body.x + body.w - col2 - 6.0 * s);
+            app.ui.text(&dt, col2, y + 15.0 * s, 11.5, F::Reg, T.text);
+            if vis && app.ui.click_in(r) {
+                escolhido = Some(c.clone());
+            }
+            y += lh;
+        }
+    }
+    y += 22.0 * s;
+    app.ui.text("Atalhos de teclado e da área de trabalho", body.x + 4.0 * s, y, 13.0, F::Bold, T.highlight);
+    y += 8.0 * s;
+    for (k, d) in teclas {
+        app.ui.text(k, body.x + 8.0 * s, y + 15.0 * s, 11.5, F::Bold, T.dim);
+        let dt = crate::phone::clip_text(&app.ui, d, 11.5, F::Reg, body.x + body.w - col2 - 6.0 * s);
+        app.ui.text(&dt, col2, y + 15.0 * s, 11.5, F::Reg, T.text);
+        y += lh;
+    }
+    if let Some(c) = escolhido {
+        // leva ao terminal mais recente (abre um se não houver)
+        let t = app.de.wins.iter().rev().find_map(|w| if let WinKind::Terminal(t) = w.kind { Some((w.id, t)) } else { None });
+        let (wid, t) = match t {
+            Some(x) => x,
+            None => {
+                open(app, WinKind::Terminal(0));
+                let w = app.de.wins.last().unwrap();
+                (w.id, if let WinKind::Terminal(t) = w.kind { t } else { 0 })
+            }
+        };
+        app.de.terms[t].input = c;
+        if let Some(i) = app.de.wins.iter().position(|w| w.id == wid) {
+            let mut w = app.de.wins.remove(i);
+            w.min = false;
+            app.de.wins.push(w);
+        }
+        app.ui.focus = Some(format!("lterm{}", wid));
+        app.ui.click_consumed = true;
+        app.toast("Comando levado ao terminal: complete o que faltar e aperte Enter.");
+    }
+}
+
+#[cfg(test)]
+mod t_ajuda {
+    use super::*;
+    use pericia_core::casegen::generate;
+    use pericia_core::model::ModuleId;
+
+    /// Os comandos da ajuda funcionam no Linux da estação, na ordem (depois de adquirir a
+    /// imagem pela bancada): nenhum "comando não encontrado" nem erro de uso.
+    #[test]
+    fn comandos_da_ajuda_funcionam() {
+        let mut sim = pericia_core::engine::Sim::new(generate(ModuleId::M501, 1, 7));
+        let m = sim.case.media[0].id.clone();
+        let id = sim.case.id.clone();
+        let ml = m.to_lowercase();
+        sim.strict = false;
+        for c in [format!("conectar {} bloqueador", ml), "conectar bloqueador estacao".into(), format!("bloqueio {}", ml), format!("imagem {}", ml)] {
+            let o = sim.exec(&c);
+            assert!(o.ok, "{} -> {}", c, o.text);
+        }
+        let mut os = Os::new(&sim);
+        os.sync(&sim);
+        let mut sh = Shell::new(&os.home.clone());
+        let marcadores = ["arquivo", "pasta", "termo", "expressão", "texto", "comando"];
+        for (_, v) in comandos_ajuda(&id, &m) {
+            for (c, _) in v {
+                if c.split_whitespace().any(|w| marcadores.contains(&w)) || c.starts_with("pericia imagem") {
+                    continue;
+                }
+                let out = run_line(&mut os, &mut sim, &mut sh, &c);
+                assert!(!out.contains("comando não encontrado") && !out.contains("uso:"), "{} -> {}", c, out);
+                assert_eq!(sh.last_code, 0, "{} -> {}", c, out);
+            }
+        }
+    }
 }
