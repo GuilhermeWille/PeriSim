@@ -1771,6 +1771,20 @@ fn run_script(app: &mut App, sc: &mut Script) -> bool {
             app.de.menu_open = false;
             linuxde::open(app, k);
         }
+        "defrente" => {
+            // traz a janela à frente ("defrente term" = o primeiro terminal)
+            let i = app.de.wins.iter().position(|w| match (arg.as_str(), w.kind) {
+                ("term", linuxde::WinKind::Terminal(_)) => true,
+                ("aval", linuxde::WinKind::Avaliacao) => true,
+                ("doc", linuxde::WinKind::Documento) => true,
+                _ => false,
+            });
+            if let Some(i) = i {
+                let mut w = app.de.wins.remove(i);
+                w.min = false;
+                app.de.wins.push(w);
+            }
+        }
         "cwd" => app.de.files_cwd = arg,
         "edit" => linuxde::open_in_editor(app, &arg),
         "menuopen" => app.de.menu_open = true,
@@ -1882,6 +1896,27 @@ fn run_script(app: &mut App, sc: &mut Script) -> bool {
                 config::open(app);
             }
         },
+        "mira" => {
+            // como "aim", mas girando a cabeça suavemente: "mira <alvo> [quadros]"
+            let mut it = arg.split_whitespace();
+            let a = it.next().unwrap_or("").to_string();
+            let n: u32 = it.next().and_then(|x| x.parse().ok()).unwrap_or(18);
+            let id = if a.starts_with("T:") || a.starts_with("M:") || a.starts_with("P:") { a.clone() } else { a.to_uppercase() };
+            if let Some(c) = app.item_pos.get(&id).copied() {
+                let eye = app.player.eye();
+                let d = (c - eye).normalize_or_zero();
+                let y0 = app.player.yaw;
+                let mut y1 = d.x.atan2(d.z);
+                while y1 - y0 > std::f32::consts::PI {
+                    y1 -= std::f32::consts::TAU;
+                }
+                while y1 - y0 < -std::f32::consts::PI {
+                    y1 += std::f32::consts::TAU;
+                }
+                sc.anim = Some((app.player.pos, app.player.pos, y0, y1, app.player.pitch, d.y.asin(), n.max(1), 0));
+                sc.wait = 0;
+            }
+        }
         "aim" => {
             // vira a câmera para o centro de um alvo da cena ("aim T:camera", "aim ITEM-01")
             let id = if arg.starts_with("T:") || arg.starts_with("M:") || arg.starts_with("P:") { arg.clone() } else { arg.to_uppercase() };
