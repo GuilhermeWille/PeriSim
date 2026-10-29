@@ -25,7 +25,9 @@ pub fn assets_dir() -> Option<PathBuf> {
         let p = PathBuf::from(p);
         return p.is_dir().then_some(p);
     }
-    let exe_side = std::env::current_exe().ok().and_then(|e| e.parent().map(|d| d.join("assets")));
+    let exe_dir = std::env::current_exe().ok().and_then(|e| e.parent().map(|d| d.to_path_buf()));
+    // ao lado do executável; no macOS, dentro do pacote .app (Contents/Resources/assets)
+    let exe_side = exe_dir.iter().flat_map(|d| [d.join("assets"), d.join("../Resources/assets")]).collect::<Vec<_>>();
     for c in exe_side.into_iter().chain(std::iter::once(PathBuf::from("assets"))) {
         if c.is_dir() {
             return Some(c);

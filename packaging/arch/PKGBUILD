@@ -2,7 +2,7 @@
 # Uso: coloque este PKGBUILD ao lado de pericia-sim-<versão>-codigo-fonte.tar.gz e rode
 #   makepkg -si
 pkgname=pericia-sim
-pkgver=0.9.0
+pkgver=0.9.1
 pkgrel=1
 pkgdesc="Simulador de treinamento em informática forense (POPs SENASP vol. 5) — conteúdo fictício"
 arch=('x86_64')

@@ -1,5 +1,5 @@
 //! Controle em primeira pessoa: WASD/setas para andar (Shift corre), mouse para olhar
-//! (botão direito pressionado, ou Tab para capturar o cursor), colisão circular contra
+//! (travado no centro por padrão; botão direito com o cursor solto), colisão circular contra
 //! paredes e mobília, balanço sutil da cabeça ao caminhar.
 
 use crate::world::{World, EYE};

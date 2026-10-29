@@ -284,7 +284,7 @@ pub fn draw(app: &mut App, area: Rect) {
     let p = rect(area.x + (area.w - w) / 2.0, area.y + (area.h - h) / 2.0, w, h);
     app.ui.frame(p, Color::new(0.16, 0.12, 0.09, 1.0), Color::new(0.35, 0.25, 0.15, 1.0));
     app.ui.text("QUADRO DE PROVAS", p.x + 16.0 * s, p.y + 30.0 * s, 17.0, F::Bold, Color::new(1.0, 0.82, 0.5, 1.0));
-    app.ui.text("arraste os cartões · barbante liga dois cartões · nada aqui altera o caso ou a nota", p.x + 210.0 * s, p.y + 30.0 * s, 11.0, F::Reg, T.dim);
+    app.ui.text("arraste os cartões · barbante liga dois cartões · nada aqui altera o caso ou a nota", p.x + 236.0 * s, p.y + 30.0 * s, 11.0, F::Reg, T.dim);
     let b = board_rect(p, s);
     // cortiça
     let cork = app.renderer.as_ref().and_then(|r| r.tex.get(&crate::render::Tex::CorkPlain).cloned());

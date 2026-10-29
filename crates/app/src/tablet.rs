@@ -323,7 +323,8 @@ fn local_blocks(sim: &Sim) -> Vec<B> {
 }
 
 const CONTROLES: &str = "\
-Deslocamento: W A S D (Shift corre) · olhar: botão direito ou Tab (captura o mouse)
+Deslocamento: W A S D (Shift corre) · olhar: mouse travado no centro (o ponto é a mira); Esc ou Tab soltam, clique na cena trava de novo; + / − ajustam a sensibilidade
+O mouse fica livre sozinho no tablet, na maleta, no quadro, no celular, na estação e no painel de um objeto
 Interagir com o objeto na mira: clique ou E — abre o painel de etapas do objeto
 Maleta pericial: aproxime-se e use E — pegar ferramenta, calçar/trocar luvas, pulseira antiestática
 Uma ferramenta por vez na mão; G devolve a ferramenta à maleta. Botões com ícone pedem a ferramenta certa

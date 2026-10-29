@@ -52,9 +52,19 @@ Cada botão gera um **comando do terminal** (que aparece no terminal), então vo
 | **Linux — Ubuntu 22.04 (glibc 2.35)** | Binário executado sob Xvfb e capturas conferidas (ver docs) |
 | **Arch Linux / Omarchy (Hyprland, Wayland)** | `install.sh` e `packaging/arch/PKGBUILD` preparados; **não testado numa máquina Arch** — o ambiente de desenvolvimento não tem Arch nem Wayland. Roda por XWayland (padrão do Omarchy); `PERICIA_WAYLAND=1` tenta Wayland nativo. Som exige `alsa-lib` + `pipewire-alsa` |
 | **Linux anterior à glibc 2.34** (ex.: Ubuntu 20.04) | **Não suportado pelo binário pronto** — compilar no próprio sistema |
-| **Windows / macOS** | **Não compilados nem testados** (o ambiente de desenvolvimento não tem acesso às ferramentas de compilação cruzada); o código não usa nada específico de Linux |
+| **Windows (x86_64) / macOS (Apple Silicon e Intel)** | Compilados e testados automaticamente pelo GitHub Actions a cada versão (`.github/workflows/compilar.yml`); som por WASAPI/CoreAudio (cpal). **Ainda não jogados numa máquina Windows ou Mac real** |
 
 **Pendências conhecidas**: RAID/JBOD não é modelado (exigiria mídias compostas no sistema de evidências — mudança estrutural, deixada para decisão); o PIN do chip SIM (3 tentativas/PUK 10) consta do modelo e do manual, mas não tem comando; modelos glTF/FBX ainda não são carregados (aguardam os arquivos e a avaliação); testes de interface são por roteiro + captura de tela (sem asserções automáticas sobre pixels).
+
+## Baixar
+
+Na página **Releases** do repositório há um pacote por sistema:
+
+| Sistema | Arquivo | Como abrir |
+|---|---|---|
+| Windows 10/11 | `pericia-sim-<versão>-windows-x86_64.zip` | extraia a pasta e abra `pericia-sim.exe` (SmartScreen: *Mais informações → Executar assim mesmo*) |
+| macOS 11+ | `pericia-sim-<versão>-macos-universal.zip` | abra `Perícia Sim.app` com o botão direito → *Abrir* (app sem assinatura da Apple) |
+| Linux x86_64 | `pericia-sim-<versão>-linux-x86_64.tar.gz` | veja abaixo |
 
 ## Executar (Linux x86_64)
 
@@ -95,7 +105,7 @@ No Windows e no macOS o mesmo comando gera o executável nativo (`target/release
 
 1. No menu, escolha o **POP**, a **dificuldade** (comece por *1 · Guiado*) e clique em **Iniciar novo caso**. Para repetir um caso, digite o ID (ex.: `C501-D2-00000007`).
 2. Ajuste volume e controles em **⚙ Configurações**, se quiser. Leia o caso: tecla **T** (tablet → **Missão**) ou, na Estação, aplicativo **Caso**. O mentor fica no tablet, em **Apoio**.
-3. No **Ambiente**: **WASD** anda (Shift corre), segure o **botão direito** (ou aperte **Tab** para capturar o mouse) para olhar, mire e clique/**E** para interagir. Comece pela maleta pericial (luvas, pulseira e a ferramenta da etapa); o painel do objeto mostra a próxima etapa e o ícone da ferramenta que falta.
+3. No **Ambiente**: **WASD** anda (Shift corre), olhe com o **mouse** (travado no centro; o ponto é a mira), mire e clique/**E** para interagir. **Esc** ou **Tab** soltam o mouse e um clique na cena trava de novo; ele fica livre sozinho no tablet, na maleta, no quadro, no celular, na estação e no painel de um objeto. **+ / −** ajustam a sensibilidade (também em *Configurações → Controles*, de 0,1× a 5×). Comece pela maleta pericial (luvas, pulseira e a ferramenta da etapa); o painel do objeto mostra a próxima etapa e o ícone da ferramenta que falta.
 4. Adquira a mídia (bloqueador → imagem → verificar hash) ou extraia o celular.
 5. Vá até a **Estação Pericial** e clique no monitor (ou use a aba no topo) — a sessão já abre com um terminal. Para voltar, **◄ Levantar da estação**. No Terminal: `lsblk`, `pericia imagem m-01`, `sudo mkdir -p /mnt/m01`, `sudo mount -o ro,loop ~/casos/<ID>/M-01.dd /mnt/m01`, `grep -ril <termo> /mnt/m01`, `stat`, `sha256sum`. Use também **Arquivos**, **Navegador** e **Linha do tempo** (menu *Aplicativos*).
 6. Quando achar a expressão, registre com `achei <expressão>`; no **Documento**, use *Pré‑preencher*, revise, escreva a conclusão separando fato de inferência, *Verificar coerência* e *Emitir e finalizar*.

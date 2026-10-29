@@ -1,3 +1,5 @@
+// Windows: sem janela de console extra ao abrir o jogo.
+#![cfg_attr(target_os = "windows", windows_subsystem = "windows")]
 //! Simulador de Informática Forense — interface.
 //! Duas áreas: Área de Hardware (cena 3D com os equipamentos e ações físicas) e
 //! Estação Pericial (um PC na cena 3D cujo monitor abre o "PeritOS", com software/rede).
@@ -11,6 +13,8 @@ mod phone;
 mod render;
 mod tablet;
 mod audio;
+#[cfg(any(target_os = "windows", target_os = "macos"))]
+mod audio_out;
 mod config;
 mod sfx;
 mod video;
@@ -95,6 +99,8 @@ pub struct App {
     pub player: fps::Player,
     pub renderer: Option<render::Renderer>,
     pub hover_pick: Option<String>,
+    /// Trava do mouse suspensa pelo jogador (Esc/Tab) até clicar de novo na cena.
+    pub lock_paused: bool,
     pub seat: (Vec3, f32),
     pub selected: Option<String>,
     pub hover_label: Option<String>,
@@ -400,7 +406,7 @@ fn draw_menu(app: &mut App) {
         save::save_settings(&app.settings);
     }
     y += 40.0 * s;
-    let howto = "Como jogar\n• Área de Hardware: gire a câmera com o botão direito, aproxime com a roda e clique nos equipamentos. Cada ação física vira um comando no terminal.\n• Estação Pericial: clique no PC ao fundo ou na aba superior. No PeritOS você examina as imagens, navega na rede emulada e redige o documento.\n• Encontrar a expressão-alvo não basta: procedimento, preservação e fundamentação são avaliados.";
+    let howto = "Como jogar\n• Área de Hardware: olhe com o mouse (travado no centro — o ponto é a mira; Esc solta), ande com WASD e clique nos equipamentos. Cada ação física vira um comando no terminal.\n• Estação Pericial: clique no PC ao fundo ou na aba superior. No PeritOS você examina as imagens, navega na rede emulada e redige o documento.\n• Encontrar a expressão-alvo não basta: procedimento, preservação e fundamentação são avaliados.";
     let lines = app.ui.wrap(howto, 11.5, F::Reg, col2.w - 32.0 * s);
     for l in lines {
         if y > col2.y + col2.h - 14.0 * s {
@@ -682,12 +688,42 @@ fn hardware_inner(app: &mut App, area: Rect, modal: bool) {
     if let Some(run) = app.player.step.take() {
         sfx::footstep(app, run);
     }
+    // trava do mouse: mira por ponto no centro; destrava em qualquer ação que precise do cursor
+    // (janelas, tablet, celular, maleta, quadro, estação, painel de um objeto selecionado)
+    let needs_cursor = modal || typing || app.selected.is_some() || app.show_help_overlay;
     if !typing && is_key_pressed(KeyCode::Tab) {
-        let c = !app.player.captured;
-        app.player.set_captured(c);
+        if app.player.captured {
+            app.player.set_captured(false);
+            app.lock_paused = true;
+        } else {
+            app.selected = None;
+            app.show_help_overlay = false;
+            app.lock_paused = false;
+            app.player.set_captured(true);
+        }
     }
-    if app.player.captured && (app.ui.key_esc || modal) {
+    if app.player.captured && app.ui.key_esc {
+        // Esc só solta o mouse; um segundo Esc abre as configurações
+        app.ui.key_esc = false;
         app.player.set_captured(false);
+        app.lock_paused = true;
+    }
+    if app.player.captured && needs_cursor {
+        app.player.set_captured(false);
+    }
+    if app.settings.mouse_lock && !needs_cursor && !app.lock_paused && !app.player.captured && app.selected.is_none() {
+        app.player.set_captured(true);
+    }
+    // sensibilidade rápida: + / -
+    if !typing && !modal {
+        let up = is_key_pressed(KeyCode::Equal) || is_key_pressed(KeyCode::KpAdd);
+        let dn = is_key_pressed(KeyCode::Minus) || is_key_pressed(KeyCode::KpSubtract);
+        if up || dn {
+            let v = (app.settings.mouse_sens + if up { 0.1 } else { -0.1 }).clamp(0.1, 5.0);
+            app.settings.mouse_sens = (v * 10.0).round() / 10.0;
+            save::save_settings(&app.settings);
+            app.toast(&format!("Sensibilidade do mouse: {:.1}×  (+ / −; também em Configurações → Controles)", app.settings.mouse_sens));
+        }
     }
     // mira e seleção (alcance de braço: é preciso se aproximar)
     let aim = if app.player.captured { view.center() } else { app.ui.mouse };
@@ -761,12 +797,11 @@ fn hardware_inner(app: &mut App, area: Rect, modal: bool) {
     }
     // mira
     let cc = view.center();
-    let col = if app.hover_pick.is_some() { T.highlight } else { Color::new(1.0, 1.0, 1.0, 0.7) };
-    if app.player.captured {
-        draw_line(cc.x - 7.0 * s, cc.y, cc.x - 2.0 * s, cc.y, 2.0, col);
-        draw_line(cc.x + 2.0 * s, cc.y, cc.x + 7.0 * s, cc.y, 2.0, col);
-        draw_line(cc.x, cc.y - 7.0 * s, cc.x, cc.y - 2.0 * s, 2.0, col);
-        draw_line(cc.x, cc.y + 2.0 * s, cc.x, cc.y + 7.0 * s, 2.0, col);
+        if app.player.captured {
+        // ponto de mira: pequeno, com contorno escuro para aparecer em parede clara e escura
+        let rd = (2.6 * s).max(2.0);
+        draw_circle(cc.x, cc.y, rd + 1.4, Color::new(0.0, 0.0, 0.0, 0.55));
+        draw_circle(cc.x, cc.y, rd, if app.hover_pick.is_some() { T.highlight } else { Color::new(1.0, 1.0, 1.0, 0.92) });
     }
     if let Some((t, i)) = best.filter(|_| !modal) {
         let p = &wrld.picks[i];
@@ -778,7 +813,15 @@ fn hardware_inner(app: &mut App, area: Rect, modal: bool) {
         app.ui.frame(rr, Color::new(0.0, 0.0, 0.0, 0.75), if near { T.highlight } else { T.border });
         app.ui.text(&txt, rr.x + 9.0 * s, rr.y + 16.5 * s, 12.5, F::Reg, if near { T.text } else { T.dim });
     }
-    let clicked = app.ui.click_in(view);
+    let clicked = if app.player.captured {
+        let c = app.ui.clicked && !app.ui.click_consumed;
+        if c {
+            app.ui.click_consumed = true;
+        }
+        c
+    } else {
+        app.ui.click_in(view)
+    };
     let pressed_e = !typing && is_key_pressed(KeyCode::E);
     if !typing && !modal && is_key_pressed(KeyCode::G) && app.sim.as_ref().map(|x| x.strict && x.equip.hand.is_some()).unwrap_or(false) {
         let out = app.run("guardar");
@@ -828,7 +871,9 @@ fn hardware_inner(app: &mut App, area: Rect, modal: bool) {
                 app.toast(info);
             }
             None if clicked && !app.player.captured => {
+                // clicar na cena fecha o painel do objeto e trava a mira de novo
                 app.selected = None;
+                app.lock_paused = false;
             }
             None => {}
         }
@@ -893,7 +938,7 @@ fn hud(app: &mut App, view: Rect) {
 /// Dicas discretas no canto inferior esquerdo; "T Tablet" também é clicável.
 fn hint_chips(app: &mut App, view: Rect) {
     let s = app.ui.scale;
-    let look = if app.player.captured { ("Tab", "soltar o mouse") } else { ("Btn. dir.", "olhar") };
+    let look = if app.player.captured { ("Esc", "soltar o mouse") } else if app.settings.mouse_lock { ("Clique", "travar a mira") } else { ("Btn. dir.", "olhar") };
     let chips = [("E", "Interagir / maleta"), look];
     let mut x = view.x + 12.0 * s;
     let y = view.y + view.h - 30.0 * s;
@@ -1673,6 +1718,7 @@ async fn main() {
         player: fps::Player::new(),
         renderer: None,
         hover_pick: None,
+        lock_paused: false,
         seat: (vec3(0.0, 0.0, 0.0), std::f32::consts::PI),
         selected: None,
         hover_label: None,
@@ -1724,6 +1770,13 @@ async fn main() {
         let t0 = std::time::Instant::now();
         let scale = app.settings.ui_scale;
         app.ui.begin(scale);
+        if app.player.captured {
+            // cursor escondido e travado: a interface não deve reagir à posição fantasma
+            app.ui.mouse = vec2(-1.0e5, -1.0e5);
+            if app.screen != Screen::Game || app.area != Area::Hardware {
+                app.player.set_captured(false);
+            }
+        }
         let held = if app.config.open { Some(app.ui.hold()) } else { None };
         match app.screen {
             Screen::Menu => draw_menu(&mut app),

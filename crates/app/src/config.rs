@@ -124,19 +124,23 @@ pub fn draw(app: &mut App) {
             }
         }
         2 => {
-            slider_row(app, "sens", cx, y, cw, "Sensibilidade do mouse", &mut st.mouse_sens, 0.2, 3.0, |v| format!("{:.1}×", v));
+            slider_row(app, "sens", cx, y, cw, "Sensibilidade da câmera", &mut st.mouse_sens, 0.1, 5.0, |v| format!("{:.1}×", v));
             y += row + 4.0 * s;
+            app.ui.toggle(rect(cx, y, cw, 32.0 * s), "Travar o mouse no centro (mira por ponto)", &mut st.mouse_lock);
+            y += 38.0 * s;
             app.ui.toggle(rect(cx, y, cw, 32.0 * s), "Inverter eixo vertical", &mut st.invert_y);
             y += 48.0 * s;
             app.ui.text("Teclas", cx, y + 12.0 * s, 13.0, F::Bold, T.text);
             y += 24.0 * s;
             for (k, d) in [
                 ("W A S D / setas", "andar (Shift corre)"),
-                ("Botão direito ou Tab", "olhar / capturar o mouse"),
+                ("Mouse", "olhar (travado no centro; o ponto é a mira)"),
+                ("Esc / Tab", "soltar o mouse · clique na cena trava de novo"),
+                ("+ / −", "sensibilidade da câmera"),
                 ("Clique ou E", "interagir com o objeto na mira / abrir a maleta"),
                 ("T", "tirar ou guardar o tablet"),
                 ("G", "devolver à maleta a ferramenta da mão"),
-                ("Esc", "fechar janelas; no ambiente, abrir estas configurações"),
+                ("Esc", "fechar janelas; com o mouse solto, abrir estas configurações"),
                 ("Page Up / Page Down", "olhar para cima / para baixo pelo teclado"),
             ] {
                 app.ui.text(k, cx, y + 12.0 * s, 12.0, F::Bold, T.dim);

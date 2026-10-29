@@ -16,3 +16,7 @@ serde_json = "1"
 
 [target.'cfg(target_os = "linux")'.dependencies]
 libc = "0.2"
+
+# Saída de som no Windows (WASAPI) e no macOS (CoreAudio); no Linux o jogo usa ALSA por dlopen.
+[target.'cfg(any(target_os = "windows", target_os = "macos"))'.dependencies]
+cpal = "0.18"

@@ -209,6 +209,8 @@ pub struct Settings {
     // controles
     pub mouse_sens: f32,
     pub invert_y: bool,
+    /// Mouse travado no centro da tela no ambiente 3D (mira por ponto).
+    pub mouse_lock: bool,
     pub fov_deg: f32,
     // interface
     pub show_hints: bool,
@@ -232,6 +234,7 @@ impl Default for Settings {
             vol_music: 0.45,
             mouse_sens: 1.0,
             invert_y: false,
+            mouse_lock: true,
             fov_deg: 70.0,
             show_hints: true,
             held_tablet: true,
@@ -248,7 +251,7 @@ impl Settings {
             "ui_scale": self.ui_scale, "render3d": self.render3d, "low_power": self.low_power, "shadows": self.shadows,
             "vol_master": self.vol_master, "vol_ambient": self.vol_ambient, "vol_effects": self.vol_effects, "vol_ui": self.vol_ui,
             "muted": self.muted, "footsteps": self.footsteps, "music_on": self.music_on, "vol_music": self.vol_music,
-            "mouse_sens": self.mouse_sens, "invert_y": self.invert_y, "fov_deg": self.fov_deg,
+            "mouse_sens": self.mouse_sens, "invert_y": self.invert_y, "mouse_lock": self.mouse_lock, "fov_deg": self.fov_deg,
             "show_hints": self.show_hints, "held_tablet": self.held_tablet,
         })
         .to_string()
@@ -272,8 +275,9 @@ impl Settings {
             footsteps: b("footsteps", d.footsteps),
             music_on: b("music_on", d.music_on),
             vol_music: f("vol_music", d.vol_music, 0.0, 1.0),
-            mouse_sens: f("mouse_sens", d.mouse_sens, 0.2, 3.0),
+            mouse_sens: f("mouse_sens", d.mouse_sens, 0.1, 5.0),
             invert_y: b("invert_y", d.invert_y),
+            mouse_lock: b("mouse_lock", d.mouse_lock),
             fov_deg: f("fov_deg", d.fov_deg, 55.0, 95.0),
             show_hints: b("show_hints", d.show_hints),
             held_tablet: b("held_tablet", d.held_tablet),
@@ -325,7 +329,7 @@ mod tests {
         assert!(!old.shadows && old.vol_master == Settings::default().vol_master);
         // valores absurdos são limitados
         let bad = Settings::from_json(r#"{"vol_master":7,"fov_deg":400,"mouse_sens":-1}"#);
-        assert_eq!((bad.vol_master, bad.fov_deg, bad.mouse_sens), (1.0, 95.0, 0.2));
+        assert_eq!((bad.vol_master, bad.fov_deg, bad.mouse_sens), (1.0, 95.0, 0.1));
         assert_eq!(Settings::from_json("lixo"), Settings::default());
     }
 

@@ -7,7 +7,8 @@
 //!  * `PERICIA_AUDIO_WAV=<arquivo>`: grava a mixagem num WAV em tempo real (validação
 //!    sem placa de som e vídeos de demonstração com som).
 //!  * `PERICIA_AUDIO=off`: sem áudio.
-//!  * Outras plataformas: ainda sem saída (silêncio), informado no menu.
+//!  * Windows (WASAPI) e macOS (CoreAudio): pelo cpal (`audio_out.rs`), com reamostragem
+//!    para a taxa do dispositivo.
 //!
 //! Categorias com volume próprio: ambiente, efeitos (objetos, passos, ações) e interface.
 
@@ -468,9 +469,32 @@ impl Audio {
         });
     }
 
-    #[cfg(not(target_os = "linux"))]
+    #[cfg(any(target_os = "windows", target_os = "macos"))]
     fn start_device(&mut self) {
-        self.set_status("saída de som ainda não implementada nesta plataforma (o jogo segue em silêncio)");
+        let mix = self.mix.clone();
+        let status = self.status.clone();
+        let ok = self.ok.clone();
+        std::thread::spawn(move || {
+            let (st2, ok2) = (status.clone(), ok.clone());
+            let api = if cfg!(target_os = "windows") { "WASAPI" } else { "CoreAudio" };
+            let r = crate::audio_out::run(
+                RATE,
+                move |buf, n| mix.lock().unwrap().render(buf, n),
+                move |info| {
+                    *st2.lock().unwrap() = format!("ativo ({}, saída padrão do sistema — {})", api, info);
+                    ok2.store(true, Ordering::SeqCst);
+                },
+            );
+            if let Err(e) = r {
+                *status.lock().unwrap() = format!("indisponível — {}; o jogo segue em silêncio", e);
+                ok.store(false, Ordering::SeqCst);
+            }
+        });
+    }
+
+    #[cfg(not(any(target_os = "linux", target_os = "windows", target_os = "macos")))]
+    fn start_device(&mut self) {
+        self.set_status("saída de som não disponível nesta plataforma (o jogo segue em silêncio)");
     }
 }
 
