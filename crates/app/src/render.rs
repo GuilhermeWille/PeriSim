@@ -44,6 +44,11 @@ pub enum Tex {
     ClockFace,
     Document,
     Blood,
+    // exterior visto pela janela (sem iluminação da sala, sem sombra)
+    Sky,
+    Facade,
+    Ground,
+    CorkPlain,
 }
 
 impl Tex {
@@ -82,18 +87,22 @@ impl Tex {
             Tex::ClockFace => "relogio",
             Tex::Document => "documento",
             Tex::Blood => "mancha",
+            Tex::Sky => "ceu",
+            Tex::Facade => "fachada",
+            Tex::Ground => "chao_externo",
+            Tex::CorkPlain => "cortica_lisa",
         }
     }
     /// Imagem aplicada com UV 0..1 (quadros, cartazes, mostradores): não repete.
     pub fn is_image(self) -> bool {
-        matches!(self, Tex::Cork | Tex::Whiteboard | Tex::PosterPop | Tex::PosterEpi | Tex::Painting | Tex::Calendar | Tex::SignLab | Tex::ClockFace | Tex::Document | Tex::Blood)
+        matches!(self, Tex::Cork | Tex::CorkPlain | Tex::Whiteboard | Tex::PosterPop | Tex::PosterEpi | Tex::Painting | Tex::Calendar | Tex::SignLab | Tex::ClockFace | Tex::Document | Tex::Blood)
     }
 }
 
-pub const ALL_TEX: [Tex; 31] = [
+pub const ALL_TEX: [Tex; 35] = [
     Tex::White, Tex::Wood, Tex::WoodFloor, Tex::Vinyl, Tex::Wall, Tex::Ceiling, Tex::Metal, Tex::Plastic, Tex::Fabric, Tex::Mat, Tex::Vent, Tex::Keyboard, Tex::Label, Tex::Rug,
     Tex::Leaf, Tex::Cardboard, Tex::Screen, Tex::Concrete, Tex::Glass, Tex::Blob, Tex::Outside, Tex::Cork, Tex::Whiteboard, Tex::PosterPop, Tex::PosterEpi,
-    Tex::Painting, Tex::Calendar, Tex::SignLab, Tex::ClockFace, Tex::Document, Tex::Blood,
+    Tex::Painting, Tex::Calendar, Tex::SignLab, Tex::ClockFace, Tex::Document, Tex::Blood, Tex::Sky, Tex::Facade, Tex::Ground, Tex::CorkPlain,
 ];
 
 fn hash(x: i32, y: i32, s: u32) -> f32 {
@@ -261,7 +270,7 @@ pub fn gen(t: Tex) -> Vec<u8> {
                     c
                 }
                 // sem o arquivo de imagem: tons neutros (o jogo continua coerente)
-                Tex::Cork => mix([0.55, 0.38, 0.22], [0.70, 0.50, 0.30], fbm(u, v, 32, 3, 161)),
+                Tex::Cork | Tex::CorkPlain => mix([0.55, 0.38, 0.22], [0.70, 0.50, 0.30], fbm(u, v, 32, 3, 161)),
                 Tex::Whiteboard | Tex::Document => [0.96, 0.96, 0.95],
                 Tex::PosterPop => if v < 0.14 { [0.09, 0.2, 0.38] } else { [0.95, 0.96, 0.97] },
                 Tex::PosterEpi => [1.0, 0.84, 0.16],
@@ -269,6 +278,32 @@ pub fn gen(t: Tex) -> Vec<u8> {
                 Tex::Calendar | Tex::ClockFace => [0.98, 0.98, 0.97],
                 Tex::SignLab => [0.09, 0.2, 0.38],
                 Tex::Blood => [0.30, 0.06, 0.05],
+                Tex::Sky => {
+                    // céu: v = 0 no alto; nuvens esparsas, horizonte mais claro
+                    let h = 1.0 - v;
+                    let sky = mix([0.80, 0.86, 0.92], [0.38, 0.58, 0.86], h.powf(0.7));
+                    let cl = ((fbm(u * 2.0, v * 5.0, 4, 5, 181) - 0.52).max(0.0) * 3.2 * (0.25 + h)).min(1.0);
+                    mix(sky, [0.97, 0.97, 0.98], cl)
+                }
+                Tex::Facade => {
+                    // fachada: 2 andares × 3 janelas por repetição; vidro com reflexo variado
+                    let (fx, fy) = ((u * 3.0).fract(), (v * 2.0).fract());
+                    let win = fx > 0.18 && fx < 0.82 && fy > 0.22 && fy < 0.78;
+                    let k = hash((u * 3.0) as i32, (v * 2.0) as i32, 191);
+                    let n = fbm(u, v, 16, 2, 192) * 0.08;
+                    if win {
+                        let lit = if k > 0.86 { 0.35 } else { 0.0 };
+                        [0.30 + k * 0.18 + lit, 0.36 + k * 0.16 + lit * 0.8, 0.44 + k * 0.12 + lit * 0.3]
+                    } else if fy < 0.06 {
+                        [0.62 + n, 0.62 + n, 0.60 + n]
+                    } else {
+                        [0.86 + n, 0.85 + n, 0.82 + n]
+                    }
+                }
+                Tex::Ground => {
+                    let k = fbm(u, v, 32, 4, 201);
+                    [0.55 + k * 0.25, 0.55 + k * 0.25, 0.55 + k * 0.25]
+                }
             };
             let i = (y * n + x) * 4;
             px[i] = (c[0].clamp(0.0, 1.0) * 255.0) as u8;
@@ -475,6 +510,7 @@ pub fn material_tex(name: &str) -> (Tex, f32, f32, bool) {
         "tela" => (Tex::Screen, 1.0, 0.6, false),
         "luz" => (Tex::White, 1.0, 0.0, true),
         "cortica" => (Tex::Cork, 1.0, 0.05, false),
+        "corticalisa" => (Tex::CorkPlain, 1.0, 0.05, false),
         "quadrobranco" => (Tex::Whiteboard, 1.0, 0.45, false),
         "cartazpop" => (Tex::PosterPop, 1.0, 0.25, false),
         "cartazepi" => (Tex::PosterEpi, 1.0, 0.25, false),
@@ -506,6 +542,8 @@ pub struct Renderer {
     /// Objetos "em mãos" (presos à câmera): passe principal apenas — não projetam sombra
     /// nem entram na assinatura, para não refazer o mapa de sombras a cada movimento.
     vm_batches: Vec<(Tex, Vec<Vertex>, Vec<u16>)>,
+    /// Quadriláteros com textura própria (fotos tiradas no jogo), desenhados após a cena.
+    pub extra: Vec<(Texture2D, [Vec3; 4], Color)>,
 }
 
 impl Renderer {
@@ -570,7 +608,7 @@ impl Renderer {
         for l in &mlog {
             eprintln!("[assets] {}", l);
         }
-        Renderer { tex, mat, batches: vec![], screen_tex: None, quality_high: true, depth_mat, asset_log, models, shadow_rt: Some(shadow_rt), shadows: true, shadow_sig: 0, vm_batches: vec![] }
+        Renderer { tex, mat, batches: vec![], screen_tex: None, quality_high: true, depth_mat, asset_log, models, shadow_rt: Some(shadow_rt), shadows: true, shadow_sig: 0, vm_batches: vec![], extra: vec![] }
     }
 
     fn batch(&mut self, t: Tex) -> usize {
@@ -646,7 +684,7 @@ impl Renderer {
             gl_use_material(self.depth_mat.as_ref().unwrap());
             for &i in &order {
                 let (t, v, idx) = &batches[i];
-                if idx.is_empty() || matches!(t, Tex::Blob | Tex::Glass | Tex::Outside | Tex::Wall | Tex::Ceiling) || v.iter().any(|x| x.color[3] < 255) {
+                if idx.is_empty() || matches!(t, Tex::Blob | Tex::Glass | Tex::Outside | Tex::Wall | Tex::Ceiling | Tex::Sky | Tex::Facade | Tex::Ground) || v.iter().any(|x| x.color[3] < 255) {
                     continue;
                 }
                 draw_mesh(&Mesh { vertices: v.clone(), indices: idx.clone(), texture: None });
@@ -680,6 +718,16 @@ impl Renderer {
             }
             let mesh = Mesh { vertices: v.clone(), indices: idx.clone(), texture: texture_of(self, *t) };
             draw_mesh(&mesh);
+        }
+        gl_use_default_material();
+        for (tx, p, c) in std::mem::take(&mut self.extra) {
+            let col = [(c.r * 255.0) as u8, (c.g * 255.0) as u8, (c.b * 255.0) as u8, 255];
+            let uv = [vec2(0.0, 0.0), vec2(1.0, 0.0), vec2(1.0, 1.0), vec2(0.0, 1.0)];
+            let vs = (0..4).map(|k| Vertex { position: p[k], uv: uv[k], color: col, normal: Vec4::ZERO }).collect();
+            draw_mesh(&Mesh { vertices: vs, indices: vec![0, 1, 2, 0, 2, 3], texture: Some(tx) });
+        }
+        if let Some(m) = &self.mat {
+            gl_use_material(m);
         }
         for (t, v, idx) in vm {
             if !idx.is_empty() {
@@ -736,6 +784,11 @@ impl Renderer {
 
     pub fn bx(&mut self, c: Vec3, size: Vec3, mt: M) {
         self.boxr(c, size, 0.0, mt);
+    }
+
+    /// Meias-dimensões do modelo (para encaixar objetos na mão).
+    pub fn model_half(&self, name: &str) -> Option<Vec3> {
+        self.models.get(name).map(|m| m.half)
     }
 
     pub fn has_model(&self, name: &str) -> bool {

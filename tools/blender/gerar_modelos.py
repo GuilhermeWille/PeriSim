@@ -82,6 +82,7 @@ MATERIAIS = {
     "batom": ((0.65, 0.12, 0.18), 0.4),
     "vidro": ((0.75, 0.82, 0.85), 0.1),
     "cortica": ((1.0, 1.0, 1.0), 0.9),
+    "corticalisa": ((1.0, 1.0, 1.0), 0.9),
     "quadrobranco": ((1.0, 1.0, 1.0), 0.3),
     "cartazpop": ((1.0, 1.0, 1.0), 0.6),
     "cartazepi": ((1.0, 1.0, 1.0), 0.6),
@@ -617,26 +618,37 @@ def anel(m, raio, r_cabo, centro, mat, segs=14, frac=1.0, z_passo=0.0):
         m.cilindro(r_cabo, r_cabo, comp, p, mat, segs=6, rot=(0, math.pi / 2, a + math.pi / 2))
 
 
+def _gcaixa(m, tam, centro, mat, chanfro=0.004):
+    """Caixa descrita em coordenadas do JOGO (x direita, y cima, z para o perito).
+    Blender (x, y, z) = (-x_jogo, z_jogo, y_jogo)."""
+    (sx, sy, sz), (cx, cy, cz) = tam, centro
+    m.caixa((sx, sz, sy), (-cx, cz, cy), mat, chanfro, segs=1)
+
+
 def maos():
-    """Mão direita do perito em empunhadura, com o punho da manga. Dedos para -Y (no jogo,
-    para a frente); palma voltada para +X no Blender (no jogo, para o centro da tela)."""
+    """Mão direita do perito fechada em empunhadura, em blocos (estilo "quadrado").
+    No referencial do jogo: o eixo da pega é o eixo Y que passa pela ORIGEM (cabo de
+    ferramenta, alça, borda de objeto plano); a palma fica do lado +X, os dedos dão a
+    volta pela frente (z−) e terminam do lado −X; o polegar fecha por cima; o punho e a
+    manga seguem para +Z (em direção ao perito)."""
     m = Modelo("maos")
-    # manga do casaco e punho
-    m.cilindro(0.05, 0.046, 0.24, (0.0, 0.25, -0.01), "tecido_preto", segs=12, rot=(math.pi / 2, 0, 0))
-    m.cilindro(0.047, 0.047, 0.02, (0.0, 0.135, -0.01), "tecido_cinza", segs=12, rot=(math.pi / 2, 0, 0))
-    m.cilindro(0.031, 0.036, 0.06, (0.0, 0.10, -0.008), "pele", segs=10, rot=(math.pi / 2, 0, 0))  # pulso
-    # palma (dorso para -X, palma para +X)
-    m.caixa((0.032, 0.09, 0.085), (0.0, 0.03, 0.0), "pele", 0.012, segs=2)
-    # quatro dedos: falange proximal para a frente, médio/distal dobrando para a palma (+X)
-    for k, (z, comp) in enumerate([(0.03, 0.045), (0.01, 0.05), (-0.01, 0.047), (-0.029, 0.038)]):
-        r = 0.0095 if k < 3 else 0.0085
-        m.caixa((0.022, comp, 0.019), (0.002, -0.015 - comp / 2, z), "pele", r * 0.8, segs=2)
-        m.caixa((0.04, 0.02, 0.018), (0.022, -0.03 - comp, z), "pele", r * 0.8, segs=2, rot=(0, 0, 0.35))
-        m.caixa((0.014, 0.006, 0.012), (-0.008, -0.04 - comp, z), "pele_unha", 0.002)
-    # polegar: sai da base da palma, contorna por cima da empunhadura
-    m.caixa((0.024, 0.045, 0.022), (0.018, 0.035, 0.036), "pele", 0.009, segs=2, rot=(0.25, 0, -0.35))
-    m.caixa((0.021, 0.036, 0.02), (0.031, 0.004, 0.042), "pele", 0.008, segs=2, rot=(0.15, 0, -0.75))
-    m.caixa((0.012, 0.006, 0.011), (0.044, -0.01, 0.045), "pele_unha", 0.002, rot=(0, 0, -0.75))
+    pele, unha = "pele", "pele_unha"
+    # palma (encostada no cabo, do lado +X) e dorso
+    _gcaixa(m, (0.026, 0.09, 0.08), (0.031, 0.0, 0.012), pele, 0.006)
+    # quatro dedos: segmento da frente (atravessa diante do cabo) e ponta (volta pelo lado −X)
+    for k, y in enumerate((0.033, 0.011, -0.011, -0.032)):
+        h = 0.019 if k < 3 else 0.017
+        _gcaixa(m, (0.066, h, 0.021), (0.004, y, -0.038), pele, 0.005)
+        _gcaixa(m, (0.016, h, 0.03), (-0.025, y, -0.016), pele, 0.005)
+        _gcaixa(m, (0.003, h * 0.7, 0.012), (-0.0335, y, -0.012), unha, 0.001)
+    # polegar: sai da base da palma, passa por cima e aperta do lado −X
+    _gcaixa(m, (0.05, 0.02, 0.026), (0.01, 0.054, 0.022), pele, 0.006)
+    _gcaixa(m, (0.02, 0.02, 0.036), (-0.022, 0.052, 0.0), pele, 0.006)
+    _gcaixa(m, (0.003, 0.014, 0.012), (-0.033, 0.052, -0.012), unha, 0.001)
+    # punho e manga do casaco
+    _gcaixa(m, (0.04, 0.075, 0.07), (0.03, 0.0, 0.085), pele, 0.008)
+    _gcaixa(m, (0.07, 0.1, 0.03), (0.03, 0.0, 0.13), "tecido_cinza", 0.006)
+    _gcaixa(m, (0.074, 0.104, 0.3), (0.03, 0.0, 0.29), "tecido_preto", 0.012)
     return m
 
 
@@ -964,6 +976,7 @@ MODELOS = [
     extintor,
     relogio_parede,
     lambda: quadro_parede("quadro_cortica", 1.2, 0.8, "cortica"),
+    lambda: quadro_parede("quadro_provas", 1.2, 0.8, "corticalisa"),
     lambda: quadro_parede("quadro_branco", 1.4, 0.85, "quadrobranco", moldura="metal_claro"),
     lambda: quadro_parede("cartaz_pop", 0.6, 0.85, "cartazpop", moldura="metal_escuro", prof=0.015),
     lambda: quadro_parede("cartaz_epi", 0.5, 0.7, "cartazepi", moldura="metal_escuro", prof=0.015),

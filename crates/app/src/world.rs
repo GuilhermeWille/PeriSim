@@ -27,6 +27,8 @@ pub struct World {
     /// Onde o perito fica ao sentar na estação (posição, yaw).
     pub station_seat: (Vec3, f32),
     pub start: (Vec3, f32),
+    /// Quadro de provas na parede: (canto superior esquerdo útil, direita, baixo, tamanho, normal).
+    pub board: Option<(Vec3, Vec3, Vec3, Vec2, Vec3)>,
 }
 
 fn col(min: (f32, f32), max: (f32, f32)) -> (Vec2, Vec2) {
@@ -57,6 +59,7 @@ pub fn build(r: &mut Renderer, sim: &Sim, selected: Option<&str>, hover: Option<
         lights: [(vec3(-1.2, 2.6, -0.4), vec3(1.0, 0.96, 0.88)), (vec3(1.4, 2.6, 0.9), vec3(0.95, 0.93, 0.88)), (vec3(-3.3, 1.7, 0.6), vec3(0.35, 0.42, 0.55))],
         station_seat: (vec3(0.0, 0.0, 0.0), 0.0),
         start: (vec3(0.0, 0.0, 2.1), std::f32::consts::PI),
+        board: None,
     };
     room(r, local);
     // pontos de apoio para os itens
@@ -170,12 +173,21 @@ fn on_wall(r: &mut Renderer, name: &str, wall: char, pos: f32, y: f32) {
     r.model(name, at, rot, &[]);
 }
 
+/// Quadro de provas (cortiça lisa) na parede esquerda: o jogador fixa fotos e bilhetes.
+fn board_wall(r: &mut Renderer, w: &mut World, z: f32, y: f32) {
+    on_wall(r, "quadro_provas", 'E', z, y);
+    let (bw, bh, b) = (1.2, 0.8, 0.025);
+    let origin = vec3(-3.49 + 0.0035, y + bh - b, z + bw / 2.0 - b);
+    w.board = Some((origin, vec3(0.0, 0.0, -1.0), vec3(0.0, -1.0, 0.0), vec2(bw - 2.0 * b, bh - 2.0 * b), vec3(1.0, 0.0, 0.0)));
+    w.picks.push(Pick { id: "QUADRO".into(), center: vec3(-3.45, y + bh / 2.0, z), half: vec3(0.05, bh / 2.0, bw / 2.0), label: "Quadro de provas — fixar fotos e bilhetes".into() });
+}
+
 fn decor(r: &mut Renderer, local: bool, w: &mut World, sim: &Sim) {
     if local {
         on_wall(r, "pintura_parede", 'B', 0.0, 1.45);
         on_wall(r, "calendario", 'B', 1.45, 1.05);
         on_wall(r, "relogio_parede", 'B', -1.25, 1.85);
-        on_wall(r, "quadro_cortica", 'E', -1.6, 1.0);
+        board_wall(r, w, -1.6, 1.0);
         // objetos pessoais na mesa do investigado
         r.model("porta_retrato", vec3(0.72, 0.765, -1.33), 0.25, &[]);
         r.model("cinzeiro", vec3(-0.72, 0.765, -1.3), 0.0, &[]);
@@ -188,7 +200,7 @@ fn decor(r: &mut Renderer, local: bool, w: &mut World, sim: &Sim) {
         on_wall(r, "placa_lab", 'B', 0.62, 2.22);
         on_wall(r, "quadro_branco", 'B', 0.65, 1.0);
         on_wall(r, "cartaz_pop", 'B', -0.45, 0.95);
-        on_wall(r, "quadro_cortica", 'E', -1.55, 1.0);
+        board_wall(r, w, -1.55, 1.0);
         on_wall(r, "cartaz_epi", 'F', 0.6, 1.0);
         on_wall(r, "relogio_parede", 'F', -1.2, 1.95);
         r.model("lixeira", vec3(1.55, 0.0, -1.35), 0.0, &[]);
@@ -325,6 +337,121 @@ fn outline(r: &mut Renderer, c: Vec3, h: Vec3, color: Color) {
     }
 }
 
+// ------------------------------------------------------------------ exterior (visto pela janela)
+
+/// Cor externa já "iluminada" (sem as luzes da sala) e com névoa atmosférica pela distância.
+fn sky_haze(c: [f32; 3], light: f32, dist: f32) -> Color {
+    let hz = [0.78, 0.84, 0.90];
+    let k = 1.0 - (-dist / 220.0).exp();
+    let f = |a: f32, b: f32| (a * light) * (1.0 - k) + b * k;
+    Color::new(f(c[0], hz[0]), f(c[1], hz[1]), f(c[2], hz[2]), 1.0)
+}
+
+/// Caixa externa com sombreamento fixo por face (sol da tarde vindo da direita) e névoa.
+fn out_box(r: &mut Renderer, c: Vec3, size: Vec3, t: Tex, tile: f32, base: [f32; 3]) {
+    let d = (c - vec3(-3.5, 1.5, 0.75)).length();
+    let h = size * 0.5;
+    let shade = |n: Vec3| -> f32 {
+        let sun = vec3(0.45, 0.75, 0.48).normalize();
+        0.62 + 0.38 * n.dot(sun).max(0.0) + if n.y > 0.5 { 0.05 } else { 0.0 }
+    };
+    let k = 1.0 / tile;
+    let faces: [(Vec3, [Vec3; 4], f32, f32); 5] = [
+        (vec3(1., 0., 0.), [c + vec3(h.x, h.y, h.z), c + vec3(h.x, h.y, -h.z), c + vec3(h.x, -h.y, -h.z), c + vec3(h.x, -h.y, h.z)], size.z, size.y),
+        (vec3(0., 0., 1.), [c + vec3(-h.x, h.y, h.z), c + vec3(h.x, h.y, h.z), c + vec3(h.x, -h.y, h.z), c + vec3(-h.x, -h.y, h.z)], size.x, size.y),
+        (vec3(0., 0., -1.), [c + vec3(h.x, h.y, -h.z), c + vec3(-h.x, h.y, -h.z), c + vec3(-h.x, -h.y, -h.z), c + vec3(h.x, -h.y, -h.z)], size.x, size.y),
+        (vec3(0., 1., 0.), [c + vec3(-h.x, h.y, -h.z), c + vec3(h.x, h.y, -h.z), c + vec3(h.x, h.y, h.z), c + vec3(-h.x, h.y, h.z)], size.x, size.z),
+        (vec3(-1., 0., 0.), [c + vec3(-h.x, h.y, -h.z), c + vec3(-h.x, h.y, h.z), c + vec3(-h.x, -h.y, h.z), c + vec3(-h.x, -h.y, -h.z)], size.z, size.y),
+    ];
+    for (n, p, a, b) in faces {
+        let col = sky_haze(base, shade(n), d);
+        r.quad(t, p, [vec2(0.0, 0.0), vec2(a * k, 0.0), vec2(a * k, b * k), vec2(0.0, b * k)], n, col, 0.0, true);
+    }
+}
+
+/// Rua e prédios do outro lado, árvores, horizonte e céu: profundidade real pela janela.
+/// A sala fica no 5º andar (piso externo a −14 m). Tudo emissivo (luz de dia já "assada").
+fn outside(r: &mut Renderer, wall: M) {
+    let gy = -14.0;
+    // fachada externa do nosso prédio e o vão da janela com espessura (peitoril, ombreiras, verga)
+    let concreto = [0.80, 0.78, 0.74];
+    out_box(r, vec3(-3.72, (gy + 0.9) / 2.0, 0.0), vec3(0.24, 0.9 - gy, 30.0), Tex::Ground, 2.0, concreto);
+    out_box(r, vec3(-3.72, 2.5, 0.0), vec3(0.24, 0.8, 30.0), Tex::Ground, 2.0, concreto);
+    out_box(r, vec3(-3.72, 1.5, -7.6), vec3(0.24, 1.2, 15.2), Tex::Ground, 2.0, concreto);
+    out_box(r, vec3(-3.72, 1.5, 9.1), vec3(0.24, 1.2, 15.2), Tex::Ground, 2.0, concreto);
+    r.bx(vec3(-3.62, 0.885, 0.75), vec3(0.04, 0.03, 1.5), wall);
+    out_box(r, vec3(-3.9, 0.87, 0.75), vec3(0.16, 0.04, 1.62), Tex::Ground, 1.0, [0.9, 0.9, 0.88]); // peitoril externo
+    // vidro (quase transparente) com reflexo leve
+    r.boxr(vec3(-3.56, 1.5, 0.75), vec3(0.008, 1.2, 1.5), 0.0, M { t: Tex::Glass, c: Color::new(0.82, 0.9, 0.98, 0.16), tile: 1.5, spec: 1.0, emis: false });
+    // chão: grama, calçadas e a rua
+    out_box(r, vec3(-150.0, gy - 0.05, 0.0), vec3(300.0, 0.1, 600.0), Tex::Ground, 3.0, [0.36, 0.48, 0.30]);
+    out_box(r, vec3(-11.0, gy + 0.06, 0.0), vec3(6.0, 0.12, 300.0), Tex::Ground, 1.0, [0.72, 0.71, 0.68]);
+    out_box(r, vec3(-21.0, gy + 0.02, 0.0), vec3(14.0, 0.04, 300.0), Tex::Ground, 2.0, [0.26, 0.27, 0.29]);
+    out_box(r, vec3(-31.0, gy + 0.06, 0.0), vec3(6.0, 0.12, 300.0), Tex::Ground, 1.0, [0.72, 0.71, 0.68]);
+    for k in -12..12 {
+        out_box(r, vec3(-21.0, gy + 0.045, k as f32 * 6.0), vec3(0.15, 0.01, 2.5), Tex::White, 1.0, [0.95, 0.92, 0.6]); // faixa
+    }
+    // carros estacionados (blocos simples, cores variadas)
+    for (k, z) in [-22.0f32, -9.0, 4.0, 15.0, 31.0].iter().enumerate() {
+        let c = [[0.7, 0.12, 0.1], [0.85, 0.85, 0.88], [0.15, 0.2, 0.35], [0.2, 0.2, 0.22], [0.75, 0.7, 0.55]][k];
+        let x = if k % 2 == 0 { -15.2 } else { -26.8 };
+        out_box(r, vec3(x, gy + 0.55, *z), vec3(1.8, 0.7, 4.2), Tex::White, 1.0, c);
+        out_box(r, vec3(x, gy + 1.15, *z - 0.2), vec3(1.6, 0.55, 2.2), Tex::White, 1.0, [c[0] * 0.6, c[1] * 0.6, c[2] * 0.7]);
+    }
+    // árvores nas calçadas (copas na altura do 2º e 3º andar)
+    let mut seed = 7u32;
+    let mut rnd = || {
+        seed = seed.wrapping_mul(1103515245).wrapping_add(12345);
+        ((seed >> 16) & 0x7fff) as f32 / 32767.0
+    };
+    for side in [-12.0f32, -30.5] {
+        let mut z = -60.0;
+        while z < 60.0 {
+            let hgt = 5.5 + rnd() * 3.0;
+            out_box(r, vec3(side, gy + hgt / 2.0, z), vec3(0.35, hgt, 0.35), Tex::Ground, 1.0, [0.38, 0.28, 0.2]);
+            let cw = 3.0 + rnd() * 1.5;
+            // copa em vários volumes desencontrados (menos "caixa")
+            for j in 0..5 {
+                let a = j as f32 * 1.3 + rnd();
+                let off = vec3(a.cos() * cw * 0.3, (j % 3) as f32 * cw * 0.22, a.sin() * cw * 0.3);
+                let sz = cw * (0.55 + rnd() * 0.3);
+                let leaf = [0.22 + rnd() * 0.1, 0.40 + rnd() * 0.14, 0.20 + rnd() * 0.05];
+                out_box(r, vec3(side, gy + hgt, z) + off, vec3(sz, sz * 0.75, sz), Tex::Ground, 1.0, leaf);
+            }
+            z += 9.0 + rnd() * 6.0;
+        }
+    }
+    // prédios do outro lado da rua (frente para +X, de frente para a janela)
+    let mut z = -70.0;
+    while z < 70.0 {
+        let wz = 10.0 + rnd() * 14.0;
+        let hgt = 8.0 + rnd() * 20.0 + if rnd() > 0.82 { 22.0 } else { 0.0 };
+        let dx = 14.0 + rnd() * 10.0;
+        let tint = [0.86 + rnd() * 0.12, 0.84 + rnd() * 0.1, 0.80 + rnd() * 0.12];
+        out_box(r, vec3(-36.0 - dx / 2.0 - rnd() * 4.0, gy + hgt / 2.0, z + wz / 2.0), vec3(dx, hgt, wz - 1.0), Tex::Facade, 6.0, tint);
+        out_box(r, vec3(-36.0 - dx / 2.0, gy + hgt + 0.5, z + wz / 2.0), vec3(dx * 0.4, 1.0, wz * 0.3), Tex::Ground, 1.0, [0.7, 0.7, 0.7]); // casa de máquinas
+        z += wz + rnd() * 3.0;
+    }
+    // horizonte distante, mais alto e enevoado
+    let mut z = -260.0;
+    while z < 260.0 {
+        let wz = 20.0 + rnd() * 30.0;
+        let hgt = 30.0 + rnd() * 90.0;
+        let x = -110.0 - rnd() * 120.0;
+        out_box(r, vec3(x, gy + hgt / 2.0, z), vec3(30.0, hgt, wz), Tex::Facade, 8.0, [0.85, 0.86, 0.9]);
+        z += wz + 5.0 + rnd() * 25.0;
+    }
+    // céu: fundo, laterais e teto (não recebe névoa nem luz)
+    let sky = |r: &mut Renderer, p: [Vec3; 4], n: Vec3| {
+        r.quad(Tex::Sky, p, [vec2(0.0, 0.0), vec2(2.0, 0.0), vec2(2.0, 1.0), vec2(0.0, 1.0)], n, WHITE, 0.0, true);
+    };
+    let (x0, x1, y0, y1, zz) = (-600.0, 0.0, gy - 5.0, 380.0, 600.0);
+    sky(r, [vec3(x0, y1, zz), vec3(x0, y1, -zz), vec3(x0, y0, -zz), vec3(x0, y0, zz)], vec3(1.0, 0.0, 0.0));
+    sky(r, [vec3(x1, y1, -zz), vec3(x0, y1, -zz), vec3(x0, y0, -zz), vec3(x1, y0, -zz)], vec3(0.0, 0.0, 1.0));
+    sky(r, [vec3(x0, y1, zz), vec3(x1, y1, zz), vec3(x1, y0, zz), vec3(x0, y0, zz)], vec3(0.0, 0.0, -1.0));
+    r.quad(Tex::Sky, [vec3(x0, y1, -zz), vec3(x1, y1, -zz), vec3(x1, y1, zz), vec3(x0, y1, zz)], [vec2(0.0, 0.0); 4], vec3(0.0, -1.0, 0.0), Color::new(0.45, 0.62, 0.88, 1.0), 0.0, true);
+}
+
 // ------------------------------------------------------------------ sala
 
 fn room(r: &mut Renderer, local: bool) {
@@ -334,22 +461,22 @@ fn room(r: &mut Renderer, local: bool) {
     r.bx(vec3(0.0, h + 0.05, 0.0), vec3(w, 0.1, d), m(Tex::Ceiling, rgb(255, 255, 255), 1.2, 0.0));
     let wall = if local { m(Tex::Wall, rgb(236, 226, 205), 2.0, 0.05) } else { m(Tex::Wall, rgb(222, 228, 232), 2.0, 0.05) };
     // paredes (com abertura de janela na esquerda e porta na frente)
-    r.bx(vec3(0.0, h / 2.0, -d / 2.0 - 0.05), vec3(w, h, 0.1), wall);
-    r.bx(vec3(w / 2.0 + 0.05, h / 2.0, 0.0), vec3(0.1, h, d), wall);
+    r.bx(vec3(0.0, h / 2.0, -d / 2.0 - 0.05), vec3(w + 0.2, h, 0.1), wall);
+    r.bx(vec3(w / 2.0 + 0.05, h / 2.0, 0.0), vec3(0.1, h, d + 0.2), wall);
     // parede esquerda em partes, deixando a janela (z 0..1.4, y 0.9..2.1)
-    r.bx(vec3(-w / 2.0 - 0.05, h / 2.0, -1.75), vec3(0.1, h, 2.5), wall);
-    r.bx(vec3(-w / 2.0 - 0.05, h / 2.0, 2.25), vec3(0.1, h, 1.5), wall);
+    r.bx(vec3(-w / 2.0 - 0.05, h / 2.0, -1.55), vec3(0.1, h, 3.1), wall);
+    r.bx(vec3(-w / 2.0 - 0.05, h / 2.0, 2.3), vec3(0.1, h, 1.6), wall);
     r.bx(vec3(-w / 2.0 - 0.05, 0.45, 0.75), vec3(0.1, 0.9, 1.5), wall);
     r.bx(vec3(-w / 2.0 - 0.05, 2.45, 0.75), vec3(0.1, 0.7, 1.5), wall);
     // janela: vidro emissivo (luz do dia), caixilho e peitoril
-    r.boxr(vec3(-w / 2.0 - 0.09, 1.5, 0.75), vec3(0.02, 1.2, 1.5), 0.0, M { t: Tex::Outside, c: WHITE, tile: 1.5, spec: 0.0, emis: true });
+    outside(r, wall);
     let frame = metal(rgb(225, 228, 232));
     r.bx(vec3(-w / 2.0 - 0.04, 1.5, 0.75), vec3(0.05, 1.24, 0.05), frame);
     r.bx(vec3(-w / 2.0 - 0.04, 1.5, 0.75), vec3(0.05, 0.05, 1.54), frame);
     r.bx(vec3(-w / 2.0 + 0.02, 0.89, 0.75), vec3(0.16, 0.04, 1.6), plain(rgb(235, 235, 232)));
     // parede da frente com porta
-    r.bx(vec3(-1.0, h / 2.0, d / 2.0 + 0.05), vec3(5.0, h, 0.1), wall);
-    r.bx(vec3(3.0, h / 2.0, d / 2.0 + 0.05), vec3(1.0, h, 0.1), wall);
+    r.bx(vec3(-1.05, h / 2.0, d / 2.0 + 0.05), vec3(5.1, h, 0.1), wall);
+    r.bx(vec3(3.05, h / 2.0, d / 2.0 + 0.05), vec3(1.1, h, 0.1), wall);
     r.bx(vec3(2.0, 2.45, d / 2.0 + 0.05), vec3(1.0, 0.7, 0.1), wall);
     r.bx(vec3(2.0, 1.05, d / 2.0 + 0.03), vec3(0.92, 2.1, 0.05), m(Tex::Wood, rgb(200, 190, 175), 0.8, 0.3));
     r.bx(vec3(1.66, 1.0, d / 2.0 - 0.0), vec3(0.12, 0.03, 0.04), metal(rgb(200, 200, 205)));

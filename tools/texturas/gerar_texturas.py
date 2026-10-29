@@ -174,6 +174,22 @@ def cortica(out):
     salvar(im, "quadro_cortica", (1024, 512), out)
 
 
+def cortica_lisa(out):
+    """Cortiça sem nada pregado: o quadro de provas que o jogador monta."""
+    W, H = 1200, 800
+    rnd = random.Random(12)
+    im = Image.new("RGB", (W, H), (178, 130, 82))
+    px = im.load()
+    for y in range(H):
+        for x in range(W):
+            if rnd.random() < 0.28:
+                c = px[x, y]
+                k = rnd.randint(-40, 24)
+                px[x, y] = (max(0, c[0] + k), max(0, c[1] + k), max(0, c[2] + k))
+    im = im.filter(ImageFilter.GaussianBlur(0.7))
+    salvar(im, "cortica_lisa", (1024, 512), out)
+
+
 def pintura(out):
     W, H = 900, 600
     im = Image.new("RGB", (W, H))
@@ -314,7 +330,7 @@ def main():
     base = sys.argv[1] if len(sys.argv) > 1 else "assets"
     out = os.path.join(base, "textures")
     os.makedirs(out, exist_ok=True)
-    for fn in (cartaz_pop, cartaz_epi, quadro_branco, cortica, pintura, calendario, placa_lab, relogio, documento, mancha):
+    for fn in (cartaz_pop, cartaz_epi, quadro_branco, cortica, cortica_lisa, pintura, calendario, placa_lab, relogio, documento, mancha):
         fn(out)
 
 

@@ -43,7 +43,7 @@ impl Player {
 
     pub fn camera(&self, viewport: Rect) -> Camera3D {
         let e = self.eye();
-        Camera3D { position: e, target: e + self.dir(), up: vec3(0.0, 1.0, 0.0), fovy: self.fov, aspect: Some(viewport.w / viewport.h), z_near: 0.03, z_far: 40.0, ..Default::default() }
+        Camera3D { position: e, target: e + self.dir(), up: vec3(0.0, 1.0, 0.0), fovy: self.fov, aspect: Some(viewport.w / viewport.h), z_near: 0.03, z_far: 900.0, ..Default::default() }
     }
 
     pub fn set_captured(&mut self, c: bool) {

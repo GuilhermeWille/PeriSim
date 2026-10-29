@@ -116,3 +116,13 @@ Também gerados por `tools/blender/gerar_modelos.py`:
 ## Música (`sounds/musica_noir.wav`)
 
 Jazz noir original de 126 s em ré menor, 76 bpm, em loop sem emenda (estéreo, 22,05 kHz): `tools/audio/gerar_musica.py` compõe a forma (introdução, A, A', B, A, final), o walking do contrabaixo, a bateria com vassourinhas, o piano elétrico e a melodia do sax, e sintetiza tudo — nenhum trecho é amostrado.
+
+## Novidades da v0.9
+
+| Recurso | Arquivos |
+|---|---|
+| Mãos em blocos (estilo "quadrado"), com o eixo da empunhadura na origem para segurar cada ferramenta; só aparecem com algo na mão | modelo `maos` |
+| Quadro de provas interativo na parede esquerda | modelo `quadro_provas`, textura `cortica_lisa.png` |
+| Vista da janela em 3D (5º andar: rua, calçadas, árvores, carros, prédios e horizonte com névoa) | texturas procedurais `Sky`, `Facade`, `Ground` (substituíveis por `ceu.png`, `fachada.png`, `chao_externo.png`) |
+
+As fotos tiradas no jogo ficam em `saves/fotos/<caso>/foto_NN.png` (400×300) e o quadro em `saves/quadro.json`.

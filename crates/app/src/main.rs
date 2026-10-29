@@ -15,6 +15,7 @@ mod config;
 mod sfx;
 mod video;
 mod maleta;
+mod board;
 mod world;
 mod ui;
 
@@ -40,6 +41,21 @@ fn conf() -> macroquad::conf::Conf {
             high_dpi: false,
             sample_count: 1,
             window_resizable: true,
+            // Linux: X11 (ou XWayland, como no Hyprland/Omarchy) e, se não houver, Wayland nativo.
+            // PERICIA_WAYLAND=1 prefere o Wayland nativo.
+            platform: miniquad::conf::Platform {
+                linux_backend: {
+                    let wl = std::env::var("WAYLAND_DISPLAY").map(|v| !v.is_empty()).unwrap_or(false);
+                    let x = std::env::var("DISPLAY").map(|v| !v.is_empty()).unwrap_or(false);
+                    if std::env::var("PERICIA_WAYLAND").map(|v| v == "1").unwrap_or(false) || (wl && !x) {
+                        // sessão só Wayland (sem XWayland) ou pedido explícito
+                        miniquad::conf::LinuxBackend::WaylandWithX11Fallback
+                    } else {
+                        miniquad::conf::LinuxBackend::X11WithWaylandFallback
+                    }
+                },
+                ..Default::default()
+            },
             ..Default::default()
         },
         // lotes grandes (modelos 3D): cada malha do renderizador cabe numa chamada de desenho
@@ -108,6 +124,7 @@ pub struct App {
     pub key_n: u32,
     pub config: config::ConfigUi,
     pub maleta: maleta::MaletaUi,
+    pub board: board::BoardUi,
     /// Ícones das ferramentas (assets/icons).
     pub icons: std::collections::HashMap<String, Texture2D>,
     /// Legenda exibida em roteiros de demonstração (gravação de vídeo).
@@ -124,6 +141,11 @@ impl App {
         self.term.scroll = f32::MAX;
         let _ = save::save_current(self.sim.as_ref().unwrap(), &self.cmdlog);
         sfx::command(self, cmd, out.ok);
+        // a fotografia é real: a próxima imagem da cena vira foto do caso (quadro de provas)
+        if out.ok && cmd.trim_start().starts_with("fotografar") && self.settings.render3d {
+            let alvo = cmd.split_whitespace().nth(1).unwrap_or("").to_uppercase();
+            self.board.pending_photo = Some(alvo);
+        }
         if out.ok { out.text } else { format!("ERRO: {}", out.text) }
     }
     /// Como `run`, mas sem ecoar a saída completa no terminal (edições do documento).
@@ -184,6 +206,7 @@ impl App {
         self.phone.close();
         let cid = self.sim.as_ref().unwrap().case.id.clone();
         self.tablet.bind_case(&cid, true);
+        self.board.bind_case(&cid, true);
         let _ = save::save_current(self.sim.as_ref().unwrap(), &self.cmdlog);
         // o resumo do caso aparece primeiro no terminal
         let brief = pericia_core::tools::describe_case(self.sim.as_ref().unwrap());
@@ -206,6 +229,7 @@ impl App {
                 }
                 self.phone.close();
                 self.tablet.bind_case(&sim.case.id, false);
+                self.board.bind_case(&sim.case.id, false);
                 self.sim = Some(sim);
                 self.cmdlog = cmds;
                 self.screen = Screen::Game;
@@ -517,6 +541,18 @@ fn hardware(app: &mut App, area: Rect) {
         return;
     }
     let typing = matches!(app.ui.focus.as_deref(), Some("term") | Some("pin") | Some("seed"));
+    if board::keys(app) {
+        let clicked = app.ui.clicked && !app.ui.click_consumed;
+        let wheel = app.ui.wheel;
+        app.ui.click_consumed = true;
+        app.ui.wheel = 0.0;
+        hardware_inner(app, area, true);
+        app.ui.click_consumed = !clicked;
+        app.ui.wheel = wheel;
+        app.ui.tooltip = None;
+        board::draw(app, area);
+        return;
+    }
     if maleta::keys(app) {
         let clicked = app.ui.clicked && !app.ui.click_consumed;
         let wheel = app.ui.wheel;
@@ -607,8 +643,13 @@ fn hardware_inner(app: &mut App, area: Rect, modal: bool) {
         fog: vec3(0.55, 0.57, 0.60),
         fog_den: 0.018,
     };
-    if !app.tablet.open && app.phone.open.is_none() && !app.maleta.open && app.settings.held_tablet {
-        held_hand(&mut r, &cam, sim.equip.hand, sim.equip.gloves != pericia_core::equip::Gloves::Nenhuma);
+    if let Some((o, rt, dn, sz, nm)) = wrld.board {
+        board::draw_3d(app, &mut r, o, rt, dn, sz, nm);
+    }
+    let photo = app.board.pending_photo.take();
+    if photo.is_none() && !app.tablet.open && app.phone.open.is_none() && !app.maleta.open && !app.board.open && app.settings.held_tablet {
+        let (hand, gl) = app.sim.as_ref().map(|x| (x.equip.hand, x.equip.gloves != pericia_core::equip::Gloves::Nenhuma)).unwrap_or((None, false));
+        held_hand(&mut r, &cam, hand, gl);
     }
     // ouvinte e posições dos objetos para o som 3D
     let right = (cam.target - cam.position).cross(vec3(0.0, 1.0, 0.0)).normalize_or_zero();
@@ -619,6 +660,12 @@ fn hardware_inner(app: &mut App, area: Rect, modal: bool) {
     }
     r.shadows = app.settings.shadows;
     r.flush(&lights, &c);
+    if let Some(alvo) = photo {
+        let hora = app.sim.as_ref().map(|x| pericia_core::util::fmt_dt(x.clock, pericia_core::util::BRT)).unwrap_or_default();
+        let legenda = app.sim.as_ref().and_then(|x| x.case.vestigios.iter().find(|v| v.id == alvo).map(|v| format!("{} {}", v.id, v.label)).or_else(|| x.case.item(&alvo).map(|i| format!("{} {}", i.id, i.label)))).unwrap_or(alvo);
+        app.board.capture(view, &legenda, &hora);
+        app.board.flash_until = get_time() + 0.22;
+    }
     set_default_camera();
     app.renderer = Some(r);
     app.seat = wrld.station_seat;
@@ -695,6 +742,11 @@ fn hardware_inner(app: &mut App, area: Rect, modal: bool) {
             app.ui.text(&p.id, rr.x + 5.0 * s, rr.y + 13.0 * s, 11.0, F::Bold, T.text);
         }
     }
+    // clarão do flash da câmera
+    let fl = app.board.flash_until - get_time();
+    if fl > 0.0 {
+        draw_rectangle(view.x, view.y, view.w, view.h, Color::new(1.0, 1.0, 1.0, (fl / 0.22) as f32 * 0.85));
+    }
     // vinheta suave nas bordas (sensação de lente)
     let vsteps = 10;
     for k in 0..vsteps {
@@ -740,6 +792,9 @@ fn hardware_inner(app: &mut App, area: Rect, modal: bool) {
                 app.area = Area::Station;
                 app.station_zoom = true;
                 app.toast("Você se sentou na estação pericial.");
+            }
+            Some(p) if p.id == "QUADRO" => {
+                board::open(app);
             }
             Some(p) if p.id == "MALETA" || p.id == "TOOL-BAG" => {
                 maleta::open(app);
@@ -883,27 +938,38 @@ fn tool_pose(t: Tool) -> (&'static str, u8, f32) {
     }
 }
 
-/// Mão direita do perito (com luvas, se calçadas) e a ferramenta que ela segura.
+/// Mão direita do perito (com luvas, se calçadas) segurando a ferramenta. Só aparece com
+/// algo na mão. O modelo `maos` tem o eixo da pega no eixo Y local, passando pela origem:
+/// cada ferramenta é posicionada para que o cabo (ou a borda, nos objetos planos) passe ali.
 fn held_hand(r: &mut render::Renderer, cam: &Camera3D, tool: Option<Tool>, gloves: bool) {
+    let Some(t) = tool else { return };
     let f = (cam.target - cam.position).normalize();
     let rt = f.cross(vec3(0.0, 1.0, 0.0)).normalize_or_zero();
     if rt == Vec3::ZERO {
         return;
     }
     let up = rt.cross(f);
-    let pos = cam.position + f * 0.34 - up * 0.215 + rt * 0.205;
+    let (name, kind, sc) = tool_pose(t);
+    let tilt = match kind {
+        0 | 3 => -0.6, // cabo inclinado para a frente
+        2 => -0.1,      // câmera erguida
+        _ => -0.3,      // objeto plano voltado para o perito
+    };
+    let pos = cam.position + f * 0.36 - up * 0.17 + rt * 0.17;
     let basis = Mat4::from_cols(rt.extend(0.0), up.extend(0.0), (-f).extend(0.0), pos.extend(1.0));
-    let hand = basis * Mat4::from_rotation_y(0.35) * Mat4::from_rotation_x(-0.2);
+    let hand = basis * Mat4::from_rotation_y(0.3) * Mat4::from_rotation_x(tilt);
     let pele = if gloves { render::m(render::Tex::Plastic, render::rgb(70, 110, 205), 0.3, 0.45) } else { render::m(render::Tex::White, render::rgb(205, 152, 118), 1.0, 0.25) };
     r.model_held("maos", hand, &[("pele", pele), ("pele_unha", pele)]);
-    let Some(t) = tool else { return };
-    let (name, kind, sc) = tool_pose(t);
-    let grip = Mat4::from_translation(vec3(-0.02, 0.0, -0.04));
+    let half = r.model_half(name).unwrap_or(vec3(0.05, 0.02, 0.05));
     let local = match kind {
-        0 => grip * Mat4::from_rotation_x(-std::f32::consts::FRAC_PI_2) * Mat4::from_translation(vec3(0.0, -0.055, 0.0)),
-        2 => Mat4::from_translation(vec3(-0.09, 0.07, -0.08)) * Mat4::from_rotation_y(std::f32::consts::PI + 0.2) * Mat4::from_translation(vec3(0.0, -0.05, 0.0)),
-        3 => grip * Mat4::from_rotation_y(std::f32::consts::PI) * Mat4::from_rotation_x(0.6) * Mat4::from_translation(vec3(0.0, 0.0, -0.01)),
-        _ => grip * Mat4::from_translation(vec3(-0.06, 0.0, 0.01)) * Mat4::from_rotation_x(1.15) * Mat4::from_rotation_z(0.35),
+        // haste (chave, lanterna): o cabo é o eixo Y do modelo
+        0 => Mat4::from_translation(vec3(0.0, -half.y * 0.45, 0.0)),
+        // câmera: a empunhadura (lado direito do corpo) no punho; objetiva para a frente
+        2 => Mat4::from_translation(vec3(-0.052 * sc, -0.05 * sc, 0.0)) * Mat4::from_rotation_y(std::f32::consts::PI),
+        // tesoura: argolas na mão, lâminas para a frente
+        3 => Mat4::from_rotation_x(std::f32::consts::FRAC_PI_2) * Mat4::from_rotation_y(std::f32::consts::PI) * Mat4::from_translation(vec3(0.0, 0.0, 0.0)),
+        // plano: fica de pé voltado ao perito; a mão segura a borda direita
+        _ => Mat4::from_translation(vec3(-half.x * sc + 0.012, 0.0, 0.0)) * Mat4::from_rotation_x(std::f32::consts::FRAC_PI_2),
     } * Mat4::from_scale(Vec3::splat(sc));
     r.model_held(name, hand * local, &[]);
 }
@@ -1508,6 +1574,45 @@ fn run_script(app: &mut App, sc: &mut Script) -> bool {
         }
         "tndel" => app.tablet.delete(arg.parse().unwrap_or(0)),
         "resume" => app.resume(),
+        "board" => {
+            if arg == "off" {
+                board::close(app)
+            } else {
+                board::open(app)
+            }
+        }
+        "bnote" => {
+            app.board.pin("bilhete", &arg, None);
+        }
+        "bfoto" => {
+            let k: usize = arg.parse().unwrap_or(1);
+            if let Some(f) = app.board.fotos.get(k.saturating_sub(1)).cloned() {
+                let t = format!("{} · {}", f.legenda, f.hora);
+                app.board.pin("foto", &t, Some(f.file));
+            }
+        }
+        "bnota" => {
+            if let Some(n) = app.tablet.notas.last().cloned() {
+                app.board.pin("anotacao", &format!("{}: {}", n.tag, n.texto), None);
+            }
+        }
+        "blink" => {
+            let v: Vec<u32> = arg.split_whitespace().filter_map(|x| x.parse().ok()).collect();
+            if v.len() == 2 {
+                app.board.links.push((v[0], v[1]));
+                app.board.persist();
+            }
+        }
+        "bmove" => {
+            let v: Vec<f32> = arg.split_whitespace().filter_map(|x| x.parse().ok()).collect();
+            if v.len() == 3 {
+                if let Some(c) = app.board.cards.iter_mut().find(|c| c.id == v[0] as u32) {
+                    c.x = v[1];
+                    c.y = v[2];
+                }
+                app.board.persist();
+            }
+        }
         "maleta" => {
             if arg == "off" {
                 maleta::close(app)
@@ -1593,6 +1698,7 @@ async fn main() {
         key_n: 0,
         config: config::ConfigUi::default(),
         maleta: maleta::MaletaUi::default(),
+        board: board::BoardUi::default(),
         icons,
         caption: None,
         de: linuxde::LinuxDe::new(),

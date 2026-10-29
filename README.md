@@ -50,6 +50,7 @@ Cada botão gera um **comando do terminal** (que aparece no terminal), então vo
 | Tela simulada do celular (FoneOS: tela bloqueada BFU/AFU, emergência/*#06#, início, mensagens, telefone, contatos, galeria com EXIF, arquivos, relógio, configurações; navegação auditada e sujeita às regras dos POPs) | Implementada e testada (9 testes). Sem teclado de desbloqueio na tela: o acesso depende do estado do aparelho, da senha documentada ou da extração |
 | **Linux — Ubuntu 24.04 (glibc 2.39)** | Compilado, executado, testado e medido (Xvfb + Mesa llvmpipe, sem GPU) |
 | **Linux — Ubuntu 22.04 (glibc 2.35)** | Binário executado sob Xvfb e capturas conferidas (ver docs) |
+| **Arch Linux / Omarchy (Hyprland, Wayland)** | `install.sh` e `packaging/arch/PKGBUILD` preparados; **não testado numa máquina Arch** — o ambiente de desenvolvimento não tem Arch nem Wayland. Roda por XWayland (padrão do Omarchy); `PERICIA_WAYLAND=1` tenta Wayland nativo. Som exige `alsa-lib` + `pipewire-alsa` |
 | **Linux anterior à glibc 2.34** (ex.: Ubuntu 20.04) | **Não suportado pelo binário pronto** — compilar no próprio sistema |
 | **Windows / macOS** | **Não compilados nem testados** (o ambiente de desenvolvimento não tem acesso às ferramentas de compilação cruzada); o código não usa nada específico de Linux |
 
@@ -58,13 +59,24 @@ Cada botão gera um **comando do terminal** (que aparece no terminal), então vo
 ## Executar (Linux x86_64)
 
 ```bash
-tar xzf pericia-sim-0.5.1-linux-x86_64.tar.gz
-cd pericia-sim-0.5.1-linux-x86_64
+tar xzf pericia-sim-0.9.0-linux-x86_64.tar.gz
+cd pericia-sim-0.9.0-linux-x86_64
 ./pericia-sim          # rodar direto
 ./install.sh           # ou instalar no menu de aplicativos (sem sudo)
 ```
 
 Requer apenas as bibliotecas OpenGL/X11 do sistema (presentes em qualquer desktop Linux). Funciona com o driver por software do Mesa (`llvmpipe`) quando não há GPU.
+
+### Arch Linux / Omarchy
+
+```bash
+sudo pacman -S --needed libgl libx11 libxi libxkbcommon xorg-xwayland alsa-lib pipewire-alsa
+./install.sh                        # instala em ~/.local (atalho no menu, comando pericia-sim)
+# ou, a partir do código-fonte:
+cd packaging/arch && makepkg -si    # compila e instala como pacote do pacman
+```
+
+No Hyprland o jogo abre por XWayland (é o padrão do Omarchy). Para tentar o backend Wayland nativo: `PERICIA_WAYLAND=1 pericia-sim`. Sem `pipewire-alsa` o jogo funciona, mas fica sem som.
 
 ## Compilar a partir do código (Linux, Windows, macOS)
 
@@ -73,7 +85,7 @@ Requer apenas as bibliotecas OpenGL/X11 do sistema (presentes em qualquer deskto
 3. Na pasta do projeto:
 
 ```bash
-cargo test --workspace              # 87 testes (motor, Linux simulado, celular, nuvem, extensões, replay, assets)
+cargo test --workspace              # 113 testes (motor, passo a passo, geração procedural, Linux simulado, celular, quadro, replay, assets)
 cargo run --release -p pericia_app  # abre o simulador
 ```
 
@@ -87,7 +99,8 @@ No Windows e no macOS o mesmo comando gera o executável nativo (`target/release
 4. Adquira a mídia (bloqueador → imagem → verificar hash) ou extraia o celular.
 5. Vá até a **Estação Pericial** e clique no monitor (ou use a aba no topo) — a sessão já abre com um terminal. Para voltar, **◄ Levantar da estação**. No Terminal: `lsblk`, `pericia imagem m-01`, `sudo mkdir -p /mnt/m01`, `sudo mount -o ro,loop ~/casos/<ID>/M-01.dd /mnt/m01`, `grep -ril <termo> /mnt/m01`, `stat`, `sha256sum`. Use também **Arquivos**, **Navegador** e **Linha do tempo** (menu *Aplicativos*).
 6. Quando achar a expressão, registre com `achei <expressão>`; no **Documento**, use *Pré‑preencher*, revise, escreva a conclusão separando fato de inferência, *Verificar coerência* e *Emitir e finalizar*.
-7. Leia a **Avaliação**: cada ponto perdido traz o motivo.
+7. **Quadro de provas** (parede esquerda, ou mire nele e aperte E): cada foto tirada com a câmera na cena vira uma foto de verdade no quadro; acrescente bilhetes, anotações do tablet e ligue tudo com barbante vermelho. O quadro também aparece na parede, em 3D.
+8. Leia a **Avaliação**: cada ponto perdido traz o motivo.
 
 Atalhos do terminal: ↑/↓ histórico, `limpar`, Ctrl+V cola. No editor e nos campos do documento: setas, Home/End, Delete e clique posicionam o cursor.
 
