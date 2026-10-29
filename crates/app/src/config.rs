@@ -139,6 +139,7 @@ pub fn draw(app: &mut App) {
                 ("+ / −", "sensibilidade da câmera"),
                 ("Clique ou E", "interagir com o objeto na mira / abrir a maleta"),
                 ("T", "tirar ou guardar o tablet"),
+                ("F2 ou '", "abrir / fechar o terminal do simulador (Esc fecha)"),
                 ("G", "devolver à maleta a ferramenta da mão"),
                 ("Esc", "fechar janelas; com o mouse solto, abrir estas configurações"),
                 ("Page Up / Page Down", "olhar para cima / para baixo pelo teclado"),

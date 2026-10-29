@@ -192,6 +192,14 @@ impl App {
         self.desk.scroll = 0.0;
     }
 
+    /// Ao entrar na cena: terminal do simulador oculto, nenhum campo de texto em foco e
+    /// mouse travado (a trava liga no próximo quadro do ambiente).
+    fn enter_scene(&mut self) {
+        self.term_open = false;
+        self.ui.focus = None;
+        self.lock_paused = false;
+    }
+
     pub fn start_case(&mut self, m: ModuleId, d: u8, seed: u32) {
         let case = generate(m, d, seed);
         let mut sim = Sim::new(case);
@@ -218,6 +226,7 @@ impl App {
         let brief = pericia_core::tools::describe_case(self.sim.as_ref().unwrap());
         self.term.lines.push_str(&format!("\n{}\n", brief));
         self.term.scroll = 0.0;
+        self.enter_scene();
     }
 
     pub fn resume(&mut self) {
@@ -227,6 +236,7 @@ impl App {
                 self.de.os_case = sim.case.id.clone();
                 self.de.os = Some(os);
                 self.term.lines = format!("Sessão restaurada por replay de {} comando(s). Cadeia de auditoria íntegra.\n", cmds.len());
+                self.enter_scene();
                 for w in &warn {
                     self.term.lines.push_str(&format!("ATENÇÃO: {}\n", w));
                 }
@@ -453,7 +463,7 @@ fn top_bar(app: &mut App) -> f32 {
                     app.screen = Screen::Menu;
                     app.history = save::history();
                 }
-                1 => app.term_open = !app.term_open,
+                1 => toggle_terminal(app),
                 _ => config::open(app),
             }
         }
@@ -822,6 +832,10 @@ fn hardware_inner(app: &mut App, area: Rect, modal: bool) {
     } else {
         app.ui.click_in(view)
     };
+    if clicked && app.ui.focus.as_deref() == Some("term") {
+        app.ui.focus = None;
+        app.lock_paused = false;
+    }
     let pressed_e = !typing && is_key_pressed(KeyCode::E);
     if !typing && !modal && is_key_pressed(KeyCode::G) && app.sim.as_ref().map(|x| x.strict && x.equip.hand.is_some()).unwrap_or(false) {
         let out = app.run("guardar");
@@ -1347,8 +1361,30 @@ fn station(app: &mut App, area: Rect) {
     }
 }
 
+fn toggle_terminal(app: &mut App) {
+    app.term_open = !app.term_open;
+    app.ui.focus = if app.term_open { Some("term".into()) } else { None };
+}
+
 fn game(app: &mut App) {
     clear_background(T.bg);
+    // o campo da semente é do menu: não pode continuar "digitando" dentro do jogo
+    if app.ui.focus.as_deref() == Some("seed") {
+        app.ui.focus = None;
+    }
+    if app.area == Area::Hardware && !app.config.open {
+        let in_term = app.ui.focus.as_deref() == Some("term");
+        // terminal do simulador: F2 abre e fecha; ' abre (fora de campos de texto); Esc fecha
+        if is_key_pressed(KeyCode::F2) || (app.ui.focus.is_none() && !app.tablet.open && !app.board.open && !app.maleta.open && app.phone.open.is_none() && is_key_pressed(KeyCode::Apostrophe)) {
+            toggle_terminal(app);
+            get_char_pressed();
+            app.ui.chars.clear();
+        } else if app.ui.key_esc && app.term_open && (in_term || app.ui.focus.is_none()) && !app.tablet.open && !app.board.open && !app.maleta.open && app.phone.open.is_none() {
+            app.ui.key_esc = false;
+            app.term_open = false;
+            app.ui.focus = None;
+        }
+    }
     // Esc no ambiente: fecha o painel do objeto; sem nada aberto, abre as configurações
     if app.ui.key_esc && app.area == Area::Hardware && !app.config.open && !app.tablet.open && app.phone.open.is_none() && !app.player.captured && app.ui.focus.is_none() {
         app.ui.key_esc = false;
@@ -1370,8 +1406,19 @@ fn game(app: &mut App) {
         Area::Station => station(app, area),
     }
     if show_term {
-        let tr = rect(4.0 * s, screen_height() - term_h + 2.0 * s, screen_width() - 8.0 * s, term_h - 6.0 * s);
-        draw_terminal(app, tr, false);
+        let hh = 22.0 * s;
+        let hr = rect(4.0 * s, screen_height() - term_h + 2.0 * s, screen_width() - 8.0 * s, hh);
+        draw_rectangle(hr.x, hr.y, hr.w, hr.h, T.panel2);
+        app.ui.text("Terminal do simulador  ·  F2 ou ' abre e fecha  ·  Esc fecha", hr.x + 8.0 * s, hr.y + 15.5 * s, 11.0, F::Reg, T.dim);
+        let cw = 120.0 * s;
+        if app.ui.button(rect(hr.x + hr.w - cw, hr.y + 1.0 * s, cw, hh - 2.0 * s), "✕ Fechar") {
+            app.term_open = false;
+            app.ui.focus = None;
+        }
+        let tr = rect(4.0 * s, hr.y + hh + 2.0 * s, screen_width() - 8.0 * s, term_h - hh - 8.0 * s);
+        if app.term_open {
+            draw_terminal(app, tr, false);
+        }
     }
     if let Some((t, until)) = app.toast.clone() {
         if get_time() < until {
@@ -1731,7 +1778,7 @@ async fn main() {
         menu_msg: String::new(),
         panel_scroll: 0.0,
         panel_input: String::new(),
-        term_open: true,
+        term_open: false,
         toast: None,
         history: save::history(),
         show_help_overlay: false,

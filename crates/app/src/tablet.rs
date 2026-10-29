@@ -330,7 +330,7 @@ Maleta pericial: aproxime-se e use E — pegar ferramenta, calçar/trocar luvas,
 Uma ferramenta por vez na mão; G devolve a ferramenta à maleta. Botões com ícone pedem a ferramenta certa
 Tablet: T abre e fecha (Esc também fecha); nada muda no caso ao abrir ou fechar
 Estação pericial: aproxime-se do computador da bancada e interaja
-Terminal: botão Terminal na barra superior; 'ajuda' lista os comandos
+Terminal (oculto por padrão): F2, ' ou o botão Terminal na barra superior; Esc ou ✕ fecham; 'ajuda' lista os comandos
 Configurações (som, gráficos, controles, interface): botão ⚙ na barra superior ou Esc no ambiente";
 
 fn apoio_blocks(sim: &Sim, sub: u8) -> Vec<B> {
