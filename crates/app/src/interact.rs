@@ -54,6 +54,7 @@ pub fn alvo_hit(sim: &Sim, a: &Alvo, pick: &str) -> bool {
         Alvo::Midia(mid) => pick.strip_prefix("M:") == Some(mid.as_str()) || sim.case.item(pick).map(|it| is_storage_item(it) && it.media.len() == 1 && &it.media[0] == mid).unwrap_or(false),
         Alvo::Bloqueador => pick == "TOOL-WB",
         Alvo::Estacao => pick == "STATION",
+        Alvo::Parte(dono, nome) => crate::parts::hit(pick, dono, nome),
     }
 }
 
@@ -69,12 +70,23 @@ pub fn alvo_desc(sim: &Sim, a: &Alvo) -> String {
         }
         Alvo::Bloqueador => "bloqueador de escrita".into(),
         Alvo::Estacao => "estação pericial".into(),
+        Alvo::Parte(dono, nome) => crate::parts::nome_legivel(dono, nome),
     }
 }
 
 /// Etapas de todos os objetos e vestígios (calculadas uma vez por quadro).
 pub fn all_steps(sim: &Sim) -> Vec<(String, Vec<Step>)> {
     steps::owners(sim).into_iter().map(|o| { let st = steps::steps_of(sim, &o); (o, st) }).collect()
+}
+
+/// Onde fazer a etapa, quando é numa peça: " — em: parafusos da tampa de ITEM-01".
+pub fn onde(sim: &Sim, st: &Step) -> String {
+    let partes: Vec<String> = st.alvos.iter().filter(|a| matches!(a, Alvo::Parte(..))).map(|a| alvo_desc(sim, a)).collect();
+    if partes.is_empty() {
+        String::new()
+    } else {
+        format!(" — em: {}", partes.join(" → "))
+    }
 }
 
 fn tool_label(t: Option<Tool>) -> String {
@@ -219,12 +231,12 @@ pub fn use_on(app: &mut App, pick: &str, ponto: Vec3) -> bool {
         }
         Uso::Antes { quer, falta } => {
             let precisa = falta.tool.map(|t| format!(" — segure: {}", tool_name(t))).unwrap_or_default();
-            app.toast(&format!("Antes de “{}”: falta “{}”{}.", quer.label, falta.label, precisa));
+            app.toast(&format!("Antes de “{}”: falta “{}”{}{}.", quer.label, falta.label, precisa, onde(sim, &falta)));
             true
         }
         Uso::Nada(nx) => {
             if hand.is_some() {
-                let dica = nx.map(|n| format!(" Próxima etapa aqui: {} ({}).", n.label, tool_label(n.tool))).unwrap_or_default();
+                let dica = nx.map(|n| format!(" Próxima etapa aqui: {} ({}){}.", n.label, tool_label(n.tool), onde(sim, &n))).unwrap_or_default();
                 app.toast(&format!("Nada a fazer com {} neste objeto.{}", tool_label(hand), dica));
                 return true;
             }
@@ -425,7 +437,8 @@ pub fn indicators(app: &App, cam: &Camera3D, view: Rect, picks: &[world::Pick], 
         if (p.center - cam.position).length() > 7.0 {
             return;
         }
-        if let Some(sp) = world::project(cam, view, p.center + vec3(0.0, p.half.y + 0.06, 0.0)) {
+        let acima = if p.id.starts_with("P:") { 0.018 } else { 0.06 };
+        if let Some(sp) = world::project(cam, view, p.center + vec3(0.0, p.half.y + acima, 0.0)) {
             if view.contains(sp) {
                 marker(sp, s, color);
             }
@@ -594,8 +607,8 @@ pub fn hover_text(sim: &Sim, all: &[(String, Vec<Step>)], p: &world::Pick, near:
     let hand = sim.equip.hand;
     let what = match find_use(sim, all, &p.id, hand, obj) {
         Some((_, Uso::Fazer(st))) => format!("[E] {}", st.label.to_lowercase()),
-        Some((_, Uso::Antes { falta, .. })) => format!("antes: {}", falta.label.to_lowercase()),
-        Some((_, Uso::Nada(Some(n)))) => format!("próxima: {} ({})", n.label.to_lowercase(), tool_label(n.tool)),
+        Some((_, Uso::Antes { falta, .. })) => format!("antes: {}{}", falta.label.to_lowercase(), onde(sim, &falta)),
+        Some((_, Uso::Nada(Some(n)))) => format!("próxima: {} ({}){}", n.label.to_lowercase(), tool_label(n.tool), onde(sim, &n)),
         _ => String::new(),
     };
     let exam = if p.id == "STATION" { "" } else { "  [F] examinar" };

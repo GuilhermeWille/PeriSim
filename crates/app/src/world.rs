@@ -86,7 +86,7 @@ pub fn build(r: &mut Renderer, sim: &Sim, selected: Option<&str>, hover: Option<
             base = vec3(1.45, 0.50, -0.70 + OFF_Z); // dentro da gaveta aberta
         }
         if local && it.kind.is_computer() && !it.power_on && it.id != "ITEM-01" {
-            base = vec3(0.55, 0.0, -1.15 + OFF_Z); // gabinete no piso, sob a mesa
+            base = vec3(-1.25, 0.0, -1.75); // gabinete no piso, ao lado da mesa (dá para dar a volta)
         }
         let half = draw_item(r, sim, it, base);
         r.shadow(base, half);
@@ -97,6 +97,8 @@ pub fn build(r: &mut Renderer, sim: &Sim, selected: Option<&str>, hover: Option<
             outline(r, center, half + Vec3::splat(0.015), if sel { Color::new(1.0, 0.85, 0.2, 1.0) } else { Color::new(0.6, 0.85, 1.0, 1.0) });
         }
         w.picks.push(Pick { id: it.id.clone(), center, half, label: format!("{} · {}", it.id, short_label(it)) });
+        item_cables(r, sim, it, base);
+        draw_parts(r, &mut w, &it.id, base, &crate::parts::item_parts(sim, it), hover);
         item_spots.push((it.id.clone(), base, center, half));
     }
     decor(r, local, &mut w, sim);
@@ -105,14 +107,26 @@ pub fn build(r: &mut Renderer, sim: &Sim, selected: Option<&str>, hover: Option<
     let tools_at = if local { vec3(2.17, 0.75, -2.52) } else { vec3(-0.9, 0.905, 0.0) };
     let wb_on = sim.hashes.keys().any(|k| k.starts_with("wb:"));
     tool_writeblocker(r, tools_at, wb_on);
-    w.picks.push(Pick { id: "TOOL-WB".into(), center: tools_at + vec3(0.0, 0.04, 0.0), half: vec3(0.12, 0.05, 0.08), label: "Bloqueador de escrita".into() });
+    w.picks.push(Pick { id: "TOOL-WB".into(), center: tools_at + vec3(0.0, 0.035, 0.0), half: vec3(0.112, 0.037, 0.072), label: "Bloqueador de escrita".into() });
+    let bparts = crate::parts::blocker_parts(wb_on);
+    draw_parts(r, &mut w, crate::parts::BLOQ, tools_at, &bparts, hover);
+    // alavanca da chave de proteção: à direita e verde quando o bloqueio está ativo
+    if let Some(ch) = bparts.iter().find(|x| x.nome == "chave") {
+        let lado = if wb_on { 0.005 } else { -0.005 };
+        r.bx(tools_at + ch.c + vec3(lado, 0.004, 0.0), vec3(0.008, 0.006, 0.008), if wb_on { glow(rgb(80, 220, 110)) } else { plastic(rgb(200, 200, 206)) });
+    }
+    let porta_bloq = |nome: &str| bparts.iter().find(|x| x.nome == nome).map(|x| tools_at + x.c).unwrap_or(tools_at);
+    // porta USB frontal do gabinete da estação (destino do cabo do bloqueador)
+    let est_c = if local { vec3(2.7, 0.0, -2.6) } else { vec3(-1.6, 0.0, -2.6) };
+    let est_usb = crate::parts::station_usb(est_c);
+    let est_part = crate::parts::Parte { nome: "usb".into(), c: Vec3::ZERO, half: vec3(0.02, 0.012, 0.01), tipo: crate::parts::Tipo::Porta };
+    draw_parts(r, &mut w, crate::parts::ESTACAO, est_usb, &[est_part], hover);
     let eq = &sim.equip;
     // mídias retiradas e cadeia montada, ao lado do bloqueador (cada mídia é um alvo "M:<id>")
     let media_at = |k: usize| if local { tools_at + vec3(0.0, 0.0, -0.25 - 0.15 * k as f32) } else { tools_at + vec3(0.22 + 0.2 * k as f32, 0.0, -0.12) };
     let mut k = 0usize;
-    let mut media: Vec<&String> = eq.linked.keys().collect();
-    media.extend(eq.removed.iter().filter(|m| !eq.linked.contains_key(*m)));
-    for mid in media {
+    // só as retiradas de dentro de um equipamento; as avulsas (HD externo, pendrive) ficam onde estão
+    for mid in eq.removed.iter() {
         let at = media_at(k);
         let mk = sim.case.media.iter().find(|m| &m.id == mid).map(|m| m.kind);
         match mk {
@@ -122,22 +136,8 @@ pub fn build(r: &mut Renderer, sim: &Sim, selected: Option<&str>, hover: Option<
                 r.model("ssd_25", at, 0.0, &[]);
             }
         }
-        if let Some(dest) = eq.linked.get(mid) {
-            // cabo/adaptador instalado entre a mídia e o bloqueador (ou direto na estação)
-            let cabo = match mk {
-                Some(MediaKind::Nvme) => "adaptador_m2",
-                Some(MediaKind::Sd) => "leitor_sd",
-                Some(MediaKind::Usb) => "",
-                _ => "cabo_sata",
-            };
-            if !cabo.is_empty() {
-                let mid_pt = (at + tools_at) * 0.5;
-                r.model(cabo, mid_pt, 0.4, &[]);
-            }
-            if dest == "estacao" {
-                r.bx(at + vec3(0.0, 0.004, -0.35), vec3(0.006, 0.006, 0.7), plastic(rgb(200, 40, 40)));
-            }
-        }
+        let mparts = crate::parts::media_parts(mk);
+        draw_parts(r, &mut w, &format!("M.{}", mid), at, &mparts, hover);
         let sel = selected == Some(format!("M:{}", mid).as_str()) || hover == Some(format!("M:{}", mid).as_str());
         let half = vec3(0.07, 0.03, 0.09);
         if sel {
@@ -146,8 +146,21 @@ pub fn build(r: &mut Renderer, sim: &Sim, selected: Option<&str>, hover: Option<
         w.picks.push(Pick { id: format!("M:{}", mid), center: at + vec3(0.0, 0.03, 0.0), half, label: format!("Mídia {} (retirada)", mid) });
         k += 1;
     }
+    // cabos instalados, de porta a porta
+    for (mid, dest) in &eq.linked {
+        let Some(m) = sim.case.media_by_id(mid) else { continue };
+        let ponta = media_port_world(sim, mid, &w);
+        let Some(a) = ponta else { continue };
+        let b = if dest == "estacao" { est_usb } else { porta_bloq(crate::parts::porta_bloqueador(m.kind)) };
+        let cor = match m.kind {
+            MediaKind::Hdd | MediaKind::Ssd => rgb(200, 40, 40),
+            MediaKind::Nvme => rgb(60, 62, 70),
+            _ => rgb(28, 28, 32),
+        };
+        cabo(r, a, b, 0.0035, plastic(cor));
+    }
     if eq.blocker_host {
-        r.model("cabo_usb", tools_at + vec3(0.14, 0.0, 0.08), 0.0, &[]);
+        cabo(r, porta_bloq("usb_host"), est_usb, 0.003, plastic(rgb(30, 30, 34)));
     }
     // bancada de ferramentas (a do laboratório fica encostada na parede da frente)
     let (bc, bl, bd) = crate::bench::bench_geom(local);
@@ -787,7 +800,8 @@ fn office(r: &mut Renderer, w: &mut World) {
 // ------------------------------------------------------------------ ferramentas
 
 fn tool_writeblocker(r: &mut Renderer, at: Vec3, on: bool) {
-    if r.model("bloqueador_escrita", at, 0.0, &[]) {
+    // girado: as portas de origem e de destino ficam viradas para o perito
+    if r.model("bloqueador_escrita", at, std::f32::consts::PI, &[]) {
         // LEDs de estado (energia / atividade) por cima do modelo
         r.bx(at + vec3(-0.06, 0.071, 0.06), vec3(0.016, 0.003, 0.01), if on { glow(rgb(60, 240, 110)) } else { plain(rgb(40, 60, 40)) });
         r.bx(at + vec3(-0.03, 0.071, 0.06), vec3(0.016, 0.003, 0.01), if on { glow(rgb(250, 190, 40)) } else { plain(rgb(60, 50, 30)) });
@@ -816,7 +830,7 @@ fn tool_camera(r: &mut Renderer, at: Vec3) {
 fn draw_item(r: &mut Renderer, sim: &Sim, it: &Item, base: Vec3) -> Vec3 {
     match it.kind {
         ItemKind::Desktop | ItemKind::Servidor => tower(r, sim, it, base),
-        ItemKind::Notebook => notebook(r, it, base),
+        ItemKind::Notebook => notebook(r, sim, it, base),
         ItemKind::Celular | ItemKind::Tablet => phone(r, it, base),
         ItemKind::Hdd => {
             hdd(r, base + vec3(0.0, 0.013, 0.0), it.seal.as_ref().map(|s| s.intact).unwrap_or(false));
@@ -936,17 +950,14 @@ fn tower(r: &mut Renderer, sim: &Sim, it: &Item, base: Vec3) -> Vec3 {
                 _ => {}
             }
         }
-        let mut k = 0.0;
-        for sl in &it.slots {
-            if sl.media_id.is_none() || sl.hidden_by.is_some() || sl.media_id.as_ref().map(|m| sim.equip.removed.contains(m)).unwrap_or(false) {
-                continue;
-            }
-            if sl.iface == "NVMe" {
-                let p = if sl.label.contains("oculto") { c + vec3(w / 2.0 - 0.03, 0.04, -0.08) } else { c + vec3(w / 2.0 - 0.03, -0.01, 0.02) };
-                r.bx(p, vec3(0.004, 0.022, 0.08), plain(rgb(20, 120, 60)));
+        // baias de disco (gaiola metálica) e as mídias nos lugares definidos em `parts`
+        r.bx(base + vec3(0.0, 0.033, d / 2.0 - 0.1), vec3(0.116, 0.004, 0.16), metal(rgb(140, 144, 150)));
+        for (sl, pos, kind) in crate::parts::slots_visiveis(sim, it) {
+            if kind == MediaKind::Nvme || sl.iface.eq_ignore_ascii_case("NVMe") {
+                r.bx(base + pos, vec3(0.004, 0.022, 0.08), plain(rgb(20, 120, 60)));
+                r.bx(base + pos + vec3(-0.0025, 0.0, -0.01), vec3(0.002, 0.016, 0.05), plastic(rgb(30, 30, 34)));
             } else {
-                hdd(r, c + vec3(0.0, -h / 2.0 + 0.05 + k, d / 2.0 - 0.1), false);
-                k += 0.04;
+                hdd(r, base + pos + vec3(0.0, 0.0, 0.0), false);
             }
         }
     }
@@ -966,23 +977,44 @@ fn tower_live(r: &mut Renderer, it: &Item, base: Vec3) {
         if !r.model("teclado", base + vec3(-0.15, 0.0, 0.25), 0.0, &[]) {
             r.bx(base + vec3(-0.15, 0.011, 0.25), vec3(0.42, 0.022, 0.14), m(Tex::Keyboard, WHITE, 0.07, 0.2));
         }
-        if it.live.as_ref().map(|l| l.network_connected).unwrap_or(false) {
-            r.bx(base + vec3(0.0, 0.005, -0.55), vec3(0.008, 0.008, 0.6), plastic(rgb(60, 120, 220)));
-        }
     }
 }
 
-fn notebook(r: &mut Renderer, it: &Item, base: Vec3) -> Vec3 {
+fn notebook(r: &mut Renderer, sim: &Sim, it: &Item, base: Vec3) -> Vec3 {
     let body = metal(rgb(110, 114, 122));
+    if crate::parts::notebook_virado(sim, it) {
+        // fechado e de cabeça para baixo: fundo com pés de borracha, grade e a tampa de acesso
+        r.bx(base + vec3(0.0, 0.011, 0.0), vec3(0.34, 0.022, 0.24), body);
+        for (sx, sz) in [(-1.0f32, -1.0f32), (1.0, -1.0), (-1.0, 1.0), (1.0, 1.0)] {
+            r.bx(base + vec3(sx * 0.13, 0.0235, sz * 0.095), vec3(0.03, 0.003, 0.012), plain(rgb(25, 25, 28)));
+        }
+        r.bx(base + vec3(0.0, 0.0222, -0.09), vec3(0.2, 0.0006, 0.035), m(Tex::Vent, WHITE, 0.06, 0.2));
+        if !it.flag("aberto") {
+            r.bx(base + vec3(0.0, 0.0226, 0.01), vec3(0.3, 0.0012, 0.17), metal(rgb(98, 102, 110)));
+        } else {
+            // interior exposto: placa, bateria, ventoinha e as baias
+            r.bx(base + vec3(0.0, 0.0223, 0.01), vec3(0.3, 0.0008, 0.17), plain(rgb(28, 82, 50)));
+            r.bx(base + vec3(0.0, 0.025, -0.055), vec3(0.26, 0.005, 0.05), plastic(rgb(30, 30, 34)));
+            r.cyl(base + vec3(0.1, 0.0235, 0.045), 0.025, 0.003, plastic(rgb(40, 40, 44)));
+            for (_, pos, kind) in crate::parts::slots_visiveis(sim, it) {
+                if kind == MediaKind::Nvme {
+                    nvme(r, base + pos + vec3(0.0, 0.001, 0.0));
+                } else if !r.model("ssd_25", base + pos, 0.0, &[]) {
+                    r.bx(base + pos + vec3(0.0, 0.0035, 0.0), vec3(0.07, 0.007, 0.1), metal(rgb(60, 64, 72)));
+                }
+            }
+        }
+        if let Some(s) = &it.seal {
+            seal(r, base + vec3(0.171, 0.011, 0.0), vec3(0.003, 0.022, 0.2), s.intact);
+        }
+        return vec3(0.18, 0.03, 0.13);
+    }
     let face = if it.power_on { glow(rgb(60, 120, 180)) } else { plain(rgb(14, 14, 18)) };
     if !r.model("notebook", base, 0.0, &[("tela", face)]) {
         r.bx(base + vec3(0.0, 0.011, 0.0), vec3(0.34, 0.02, 0.24), body);
         r.bx(base + vec3(0.0, 0.0215, 0.02), vec3(0.28, 0.001, 0.11), m(Tex::Keyboard, WHITE, 0.06, 0.2));
         r.bx(base + vec3(0.0, 0.0215, 0.09), vec3(0.1, 0.001, 0.05), plastic(rgb(90, 94, 100)));
         r.slab_tilt(base + vec3(0.0, 0.021, -0.118), 0.34, 0.22, 0.008, 0.25, body, face);
-    }
-    if it.flag("aberto") {
-        nvme(r, base + vec3(0.25, 0.002, 0.05));
     }
     if let Some(s) = &it.seal {
         seal(r, base + vec3(0.171, 0.011, 0.0), vec3(0.003, 0.022, 0.2), s.intact);
@@ -1026,7 +1058,6 @@ fn phone(r: &mut Renderer, it: &Item, base: Vec3) -> Vec3 {
         if p.external_battery || p.charging {
             r.bx(base + vec3(-w / 2.0 - 0.07, 0.011, 0.0), vec3(0.065, 0.022, 0.12), plastic(rgb(232, 232, 238)));
             r.bx(base + vec3(-w / 2.0 - 0.04, 0.0235, -0.045), vec3(0.01, 0.002, 0.004), glow(rgb(80, 220, 120)));
-            r.bx(base + vec3(-w / 2.0 - 0.02, 0.004, 0.05), vec3(0.05, 0.004, 0.004), plain(rgb(25, 25, 25)));
         }
     }
     if it.physical.wet {
@@ -1099,4 +1130,178 @@ pub fn ray(cam: &Camera3D, viewport: Rect, p: Vec2) -> (Vec3, Vec3) {
     let a = inv.project_point3(vec3(ndc.x, ndc.y, -1.0));
     let b = inv.project_point3(vec3(ndc.x, ndc.y, 1.0));
     (a, (b - a).normalize())
+}
+
+// ------------------------------------------------------------------ partes e cabos
+
+/// Ponto do conector de uma mídia na cena (retirada ou avulsa), pelo alvo da parte.
+fn media_port_world(sim: &Sim, mid: &str, w: &World) -> Option<Vec3> {
+    let id = if sim.equip.removed.contains(mid) {
+        crate::parts::pick_id(&format!("M.{}", mid), "porta")
+    } else {
+        let it = sim.case.items.iter().find(|it| it.slots.is_empty() && it.media.len() == 1 && it.media[0] == mid)?;
+        crate::parts::pick_id(&it.id, "porta")
+    };
+    w.picks.iter().find(|p| p.id == id).map(|p| p.center)
+}
+
+/// Cabo entre dois pontos: curto, faz uma barriga suave; longo (outra mesa), desce até o
+/// piso, corre por ele e sobe.
+pub fn cabo(r: &mut Renderer, a: Vec3, b: Vec3, raio: f32, mt: M) {
+    let horiz = vec2(b.x - a.x, b.z - a.z).length();
+    let pts: Vec<Vec3> = if horiz > 0.9 {
+        let dir = vec2(b.x - a.x, b.z - a.z).normalize_or_zero();
+        let a1 = a + vec3(dir.x * 0.06, 0.0, dir.y * 0.06);
+        let b1 = b - vec3(dir.x * 0.06, 0.0, dir.y * 0.06);
+        let fa = vec3(a1.x + dir.x * 0.25, raio, a1.z + dir.y * 0.25);
+        let fb = vec3(b1.x - dir.x * 0.25, raio, b1.z - dir.y * 0.25);
+        let mut v = vec![a];
+        v.extend(curva(a1, fa, 0.0, 6).into_iter());
+        v.push(fb);
+        v.extend(curva(fb, b1, 0.0, 6).into_iter().skip(1));
+        v.push(b);
+        v
+    } else {
+        let sag = (horiz * 0.18 + 0.01).min(0.08);
+        let mut v = curva(a, b, sag, 10);
+        // não atravessa o tampo
+        let piso = a.y.min(b.y) - 0.002;
+        for p in v.iter_mut() {
+            p.y = p.y.max(piso);
+        }
+        v
+    };
+    for s in pts.windows(2) {
+        r.tube(s[0], s[1], raio, mt);
+    }
+}
+
+/// Curva de a até b com barriga `sag` para baixo (parábola), em `n` segmentos.
+fn curva(a: Vec3, b: Vec3, sag: f32, n: usize) -> Vec<Vec3> {
+    (0..=n)
+        .map(|i| {
+            let t = i as f32 / n as f32;
+            let mut p = a.lerp(b, t);
+            p.y -= sag * 4.0 * t * (1.0 - t);
+            // descidas: a ponta sai na horizontal e cai (cabo pendurado)
+            if (a.y - b.y).abs() > 0.2 {
+                let e = t * t * (3.0 - 2.0 * t);
+                p.y = a.y + (b.y - a.y) * e;
+            }
+            p
+        })
+        .collect()
+}
+
+/// Desenha as peças que o modelo do objeto não traz (parafusos, conectores, portas, chave) e
+/// cria um alvo de mira para cada parte.
+fn draw_parts(r: &mut Renderer, w: &mut World, dono: &str, base: Vec3, parts: &[crate::parts::Parte], hover: Option<&str>) {
+    use crate::parts::Tipo;
+    let parafuso = metal(rgb(150, 152, 158));
+    let fenda = plain(rgb(30, 30, 32));
+    let porta = plain(rgb(14, 14, 16));
+    for pt in parts {
+        let c = base + pt.c;
+        match pt.tipo {
+            Tipo::Parafuso('z') => {
+                r.bx(c, vec3(0.011, 0.011, 0.006), parafuso);
+                r.bx(c + vec3(0.0, 0.0, -0.0031), vec3(0.008, 0.0012, 0.0004), fenda);
+                r.bx(c + vec3(0.0, 0.0, -0.0031), vec3(0.0012, 0.008, 0.0004), fenda);
+            }
+            Tipo::Parafuso('x') => {
+                r.bx(c, vec3(0.003, 0.0065, 0.0065), parafuso);
+                let sx = if pt.c.x < 0.0 { -0.0016 } else { 0.0016 };
+                r.bx(c + vec3(sx, 0.0, 0.0), vec3(0.0004, 0.0011, 0.005), fenda);
+                r.bx(c + vec3(sx, 0.0, 0.0), vec3(0.0004, 0.005, 0.0011), fenda);
+            }
+            Tipo::Parafuso(_) => {
+                r.cyl(c, 0.0042, 0.0016, parafuso);
+                r.bx(c + vec3(0.0, 0.0009, 0.0), vec3(0.0055, 0.0004, 0.001), fenda);
+                r.bx(c + vec3(0.0, 0.0009, 0.0), vec3(0.001, 0.0004, 0.0055), fenda);
+            }
+            Tipo::Porta => {
+                // abertura escura com a lingueta metálica dentro, na face onde a porta está
+                let sz = pt.half * 1.2;
+                let (fora, dentro) = if pt.half.x <= pt.half.z * 0.75 && pt.half.x < 0.01 {
+                    (vec3(0.002, sz.y * 0.75, sz.z * 0.85), vec3(0.0024, sz.y * 0.2, sz.z * 0.6))
+                } else {
+                    (vec3(sz.x * 0.85, sz.y * 0.75, 0.002), vec3(sz.x * 0.6, sz.y * 0.2, 0.0024))
+                };
+                r.bx(c, fora, porta);
+                r.bx(c, dentro, metal(rgb(190, 190, 196)));
+            }
+            Tipo::Botao if dono.starts_with("ITEM") && pt.c.y < 0.05 => {
+                r.bx(c, vec3(0.014, 0.002, 0.009), plastic(rgb(40, 42, 48)));
+            }
+            Tipo::Conector => {
+                let dados = pt.nome.ends_with("dados");
+                r.bx(c, vec3(if dados { 0.016 } else { 0.022 }, 0.008, 0.012), plastic(rgb(20, 20, 22)));
+                let alvo = c + vec3(0.06, 0.04, -0.09);
+                let cor = if dados { rgb(200, 40, 40) } else { rgb(225, 190, 40) };
+                cabo(r, c + vec3(0.0, 0.0, -0.006), alvo, if dados { 0.003 } else { 0.0045 }, plastic(cor));
+            }
+            Tipo::Gaveta => {
+                r.bx(c, vec3(0.0012, 0.0032, 0.022), metal(rgb(150, 152, 160)));
+                r.bx(c + vec3(-0.0004, 0.0, -0.013), vec3(0.0012, 0.0012, 0.0012), porta);
+            }
+            Tipo::Tampa if pt.c.y < 0.05 => {
+                // entalhe para a unha na tampa inferior do notebook
+                r.bx(c, vec3(0.03, 0.0012, 0.004), porta);
+            }
+            Tipo::Chave => {
+                r.bx(c, vec3(0.022, 0.004, 0.014), plastic(rgb(25, 25, 28)));
+            }
+            _ => {}
+        }
+        let id = crate::parts::pick_id(dono, &pt.nome);
+        if hover == Some(id.as_str()) {
+            outline(r, c, pt.half + Vec3::splat(0.002), Color::new(0.6, 0.85, 1.0, 1.0));
+        }
+        w.picks.push(Pick { id, center: c, half: pt.half, label: capital(&crate::parts::nome_legivel(dono, &pt.nome)) });
+    }
+}
+
+fn capital(s: &str) -> String {
+    let mut c = s.chars();
+    match c.next() {
+        Some(f) => f.to_uppercase().collect::<String>() + c.as_str(),
+        None => String::new(),
+    }
+}
+
+/// Cabos ligados ao item: rede do computador ligado, cabos SATA soltos dentro do gabinete,
+/// bateria externa no celular.
+fn item_cables(r: &mut Renderer, sim: &Sim, it: &Item, base: Vec3) {
+    let parts = crate::parts::item_parts(sim, it);
+    let at = |nome: &str| parts.iter().find(|p| p.nome == nome).map(|p| base + p.c);
+    if it.kind.is_computer() && it.power_on && it.live.as_ref().map(|l| l.network_connected).unwrap_or(false) {
+        if let Some(a) = at("rede") {
+            let saida = if it.kind == ItemKind::Notebook { vec3(-0.035, 0.0, 0.0) } else { vec3(0.0, 0.0, -0.035) };
+            r.bx(a + saida * 0.3, vec3(0.012, 0.011, 0.012), plastic(rgb(220, 225, 230)));
+            let fim = a + saida * 3.0 + vec3(0.0, -(a.y - base.y) + 0.004, 0.0) + saida * 10.0;
+            cabo(r, a + saida * 0.5, fim, 0.0035, plastic(rgb(60, 120, 220)));
+        }
+    }
+    // cabos SATA já desconectados: a ponta fica solta, caída perto do disco
+    if it.flag("aberto") && matches!(it.kind, ItemKind::Desktop | ItemKind::Servidor) {
+        for (sl, pos, _) in crate::parts::slots_visiveis(sim, it) {
+            let key = format!("{}:{}", it.id, sl.id.to_uppercase());
+            for (c, x, cor) in [("dados", -0.022f32, rgb(200, 40, 40)), ("energia", 0.02, rgb(225, 190, 40))] {
+                if sim.equip.unplugged.contains(&format!("{}:{}", key, c)) {
+                    let solta = base + pos + vec3(x * 1.6, -0.022, -0.115);
+                    r.bx(solta, vec3(0.016, 0.008, 0.012), plastic(rgb(20, 20, 22)));
+                    cabo(r, solta, base + pos + vec3(x + 0.06, 0.04, -0.17), 0.003, plastic(cor));
+                }
+            }
+        }
+    }
+    if let Some(ph) = &it.phone {
+        if ph.external_battery || ph.charging {
+            let w = if it.kind == ItemKind::Tablet { 0.17 } else { 0.072 };
+            if let Some(a) = at("porta") {
+                r.bx(a + vec3(0.0, 0.0, 0.006), vec3(0.008, 0.004, 0.01), plastic(rgb(235, 235, 240)));
+                cabo(r, a + vec3(0.0, 0.0, 0.012), base + vec3(-w / 2.0 - 0.07, 0.006, 0.065), 0.0025, plastic(rgb(235, 235, 240)));
+            }
+        }
+    }
 }

@@ -17,6 +17,8 @@ pub enum Alvo {
     Bloqueador,
     Estacao,
     Vestigio(String),
+    /// Peça física (dono, parte): parafuso, tampa, conector, porta… — ver `parts`.
+    Parte(String, String),
 }
 
 #[derive(Clone, Debug)]
@@ -61,6 +63,8 @@ pub fn item_steps(sim: &Sim, it: &Item) -> Vec<Step> {
     let id = it.id.to_lowercase();
     let up = it.id.clone();
     let me = || vec![Alvo::Objeto(up.clone())];
+    // a etapa acontece numa peça, quando ela existe no modelo; senão, no objeto inteiro
+    let pt = |nome: &str| if crate::parts::tem(sim, it, nome) { vec![Alvo::Parte(up.clone(), nome.to_string())] } else { vec![Alvo::Objeto(up.clone())] };
     let eq = &sim.equip;
     let mut b = B { sim, v: vec![] };
     b.add("Fotografar".into(), format!("fotografar {}", id), audited(sim, "fotografar", &up), false, me());
@@ -68,38 +72,38 @@ pub fn item_steps(sim: &Sim, it: &Item) -> Vec<Step> {
     if let Some(ph) = &it.phone {
         b.add("Isolar (Faraday bag ou alumínio)".into(), format!("isolar {} faraday", id), ph.rf.isolates(), false, me());
         // e manter energizado (bateria baixa pode desligar e levar o aparelho a BFU)
-        b.add("Ligar à bateria externa".into(), format!("carregar {}", id), ph.charging, false, me());
+        b.add("Ligar à bateria externa".into(), format!("carregar {}", id), ph.charging, false, pt("porta"));
     }
     if it.seal.is_some() || it.doc_seal.is_some() {
-        b.add("Conferir lacre × ofício".into(), format!("lacre conferir {}", id), audited(sim, "lacre-conferir", &up), false, me());
+        b.add("Conferir lacre × ofício".into(), format!("lacre conferir {}", id), audited(sim, "lacre-conferir", &up), false, pt("lacre"));
         if let Some(s) = &it.seal {
-            b.add("Romper o lacre".into(), format!("deslacrar {}", id), !s.intact || it.flag("deslacrado"), false, me());
+            b.add("Romper o lacre".into(), format!("deslacrar {}", id), !s.intact || it.flag("deslacrado"), false, pt("lacre"));
         }
     }
     b.add("Inspecionar (lanterna)".into(), format!("inspecionar {}", id), audited(sim, "inspecionar", &id), false, me());
     if it.kind.is_computer() {
         if let Some(live) = &it.live {
             // estado volátil: só enquanto ligado; desligado sem coletar fica como não realizado
-            b.add("Isolar da rede (cabo)".into(), format!("rede isolar {}", id), !live.network_connected || !it.power_on, false, me());
-            b.add("Coletar memória (pendrive de coleta)".into(), format!("memoria {}", id), live.memory_dump.is_some() || !it.power_on, false, me());
+            b.add("Isolar da rede (cabo)".into(), format!("rede isolar {}", id), !live.network_connected || !it.power_on, false, pt("rede"));
+            b.add("Coletar memória (pendrive de coleta)".into(), format!("memoria {}", id), live.memory_dump.is_some() || !it.power_on, false, pt("usb"));
             if live.mounted_encrypted.is_some() {
-                b.add("Copiar volume montado".into(), format!("volume copiar {}", id), !it.power_on, true, me());
+                b.add("Copiar volume montado".into(), format!("volume copiar {}", id), !it.power_on, true, pt("usb"));
             }
         }
         if it.power_on || it.live.is_some() {
-            b.add("Desligar (energia)".into(), format!("energia desligar {}", id), !it.power_on, false, me());
+            b.add("Desligar (energia)".into(), format!("energia desligar {}", id), !it.power_on, false, pt("energia"));
         }
         let total = cover_screws(it);
         let aberto = it.flag("aberto");
         if total > 0 {
             let done = (*eq.screws.get(&it.id).unwrap_or(&0)).min(total);
-            b.add(format!("Soltar os parafusos da tampa ({}/{})", done, total), format!("desparafusar {}", id), done >= total || aberto, false, me());
-            b.add("Retirar a tampa".into(), format!("abrir {}", id), aberto, false, me());
+            b.add(format!("Soltar os parafusos da tampa ({}/{})", done, total), format!("desparafusar {}", id), done >= total || aberto, false, pt("parafuso"));
+            b.add("Retirar a tampa".into(), format!("abrir {}", id), aberto, false, pt("tampa"));
         }
         if aberto {
             for c in &it.components {
                 if c.kind != "tampa" {
-                    b.add(format!("Remover {}", c.label.to_lowercase()), format!("componente remover {} {}", id, c.id), c.removed, true, me());
+                    b.add(format!("Remover {}", c.label.to_lowercase()), format!("componente remover {} {}", id, c.id), c.removed, true, pt(&format!("comp.{}", c.id.to_lowercase())));
                 }
             }
             for sl in &it.slots {
@@ -109,15 +113,15 @@ pub fn item_steps(sim: &Sim, it: &Item) -> Vec<Step> {
                 if slot_has_cables(it, sl) {
                     for c in ["dados", "energia"] {
                         let done = fora || eq.unplugged.contains(&format!("{}:{}", key, c));
-                        b.add(format!("Desconectar o cabo de {} ({})", c, sl.id), format!("cabo desconectar {} {} {}", id, sl.id.to_lowercase(), c), done, false, me());
+                        b.add(format!("Desconectar o cabo de {} ({})", c, sl.id), format!("cabo desconectar {} {} {}", id, sl.id.to_lowercase(), c), done, false, pt(&format!("{}.{}", sl.id.to_lowercase(), c)));
                     }
                 }
                 let st = slot_screws(&sim.case, it, sl);
                 if st > 0 {
                     let sd = (*eq.screws.get(&key).unwrap_or(&0)).min(st);
-                    b.add(format!("Soltar os parafusos do suporte {} ({}/{})", sl.id, sd, st), format!("desparafusar {} {}", id, sl.id.to_lowercase()), fora || sd >= st, false, me());
+                    b.add(format!("Soltar os parafusos do suporte {} ({}/{})", sl.id, sd, st), format!("desparafusar {} {}", id, sl.id.to_lowercase()), fora || sd >= st, false, pt(&format!("{}.parafuso", sl.id.to_lowercase())));
                 }
-                b.add(format!("Retirar a mídia {} ({})", m, sl.id), format!("midia remover {} {}", id, sl.id.to_lowercase()), fora, false, me());
+                b.add(format!("Retirar a mídia {} ({})", m, sl.id), format!("midia remover {} {}", id, sl.id.to_lowercase()), fora, false, pt(&format!("{}.midia", sl.id.to_lowercase())));
             }
         }
     }
@@ -125,15 +129,15 @@ pub fn item_steps(sim: &Sim, it: &Item) -> Vec<Step> {
         b.add("Modo avião".into(), format!("airplane {}", id), ph.airplane, true, me());
         b.add("Desabilitar alarmes".into(), format!("alarmes {}", id), ph.alarms_disabled, true, me());
         for s in &ph.sims {
-            b.add(format!("Remover o chip SIM (slot {})", s.slot), format!("sim remover {} {}", id, s.slot), s.place != SimWhere::Slot, false, me());
+            b.add(format!("Remover o chip SIM (slot {})", s.slot), format!("sim remover {} {}", id, s.slot), s.place != SimWhere::Slot, false, pt("gaveta"));
         }
         if sim.case.module == ModuleId::M505 {
             b.add("Solicitar senhas".into(), format!("solicitar-senhas {}", id), it.flag("senhas_solicitadas"), false, me());
-            b.add("Etiqueta na câmera frontal".into(), format!("camera cobrir {}", id), ph.front_camera_covered, false, me());
+            b.add("Etiqueta na câmera frontal".into(), format!("camera cobrir {}", id), ph.front_camera_covered, false, pt("camera"));
         } else {
             // em BFU a extração completa não é possível no local: documenta-se e segue (o
             // checklist do motor avalia); por isso a etapa não trava a embalagem
-            b.add("Extrair os dados (cabo de dados)".into(), format!("extrair {}", id), audited(sim, "extracao", &up) || ph.wiped, true, me());
+            b.add("Extrair os dados (cabo de dados)".into(), format!("extrair {}", id), audited(sim, "extracao", &up) || ph.wiped, true, pt("porta"));
         }
     }
     // cadeia de aquisição das mídias acessíveis
@@ -144,9 +148,13 @@ pub fn item_steps(sim: &Sim, it: &Item) -> Vec<Step> {
         }
         let ml = mid.to_lowercase();
         let ligado = eq.linked.contains_key(mid);
-        b.add(format!("Conectar {} ao bloqueador", mid), format!("conectar {} bloqueador", ml), ligado, false, vec![Alvo::Midia(mid.clone()), Alvo::Bloqueador]);
-        b.add("Ligar o bloqueador à estação (cabo USB)".into(), "conectar bloqueador estacao".into(), eq.blocker_host || eq.linked.get(mid).map(|x| x == "estacao").unwrap_or(false), false, vec![Alvo::Bloqueador, Alvo::Estacao]);
-        b.add(format!("Ativar o bloqueio de escrita ({})", mid), format!("bloqueio {}", ml), sim.hashes.contains_key(&format!("wb:{}", mid)), false, vec![Alvo::Bloqueador]);
+        // ponta na mídia (conector do disco, do pendrive, do cartão) e na porta certa do bloqueador
+        let ponta_midia = midia_alvo(sim, mid);
+        let porta = Alvo::Parte(crate::parts::BLOQ.into(), crate::parts::porta_bloqueador(m.kind).into());
+        b.add(format!("Conectar {} ao bloqueador", mid), format!("conectar {} bloqueador", ml), ligado, false, vec![ponta_midia, porta]);
+        let usb = || vec![Alvo::Parte(crate::parts::BLOQ.into(), "usb_host".into()), Alvo::Parte(crate::parts::ESTACAO.into(), "usb".into())];
+        b.add("Ligar o bloqueador à estação (cabo USB)".into(), "conectar bloqueador estacao".into(), eq.blocker_host || eq.linked.get(mid).map(|x| x == "estacao").unwrap_or(false), false, usb());
+        b.add(format!("Ativar o bloqueio de escrita ({})", mid), format!("bloqueio {}", ml), sim.hashes.contains_key(&format!("wb:{}", mid)), false, vec![Alvo::Parte(crate::parts::BLOQ.into(), "chave".into())]);
         // cifrada por hardware: a imagem seria ilegível fora do equipamento — o caminho é clonar
         // e iniciar o original pela BIOS, na estação (terminal); aqui as etapas não travam
         let fde = m.fde.is_some();
@@ -158,6 +166,19 @@ pub fn item_steps(sim: &Sim, it: &Item) -> Vec<Step> {
     b.add("Apor lacre numerado".into(), format!("lacre aplicar {}", id), audited(sim, "lacre-aplicar", &up), false, me());
     b.add("Etiquetar".into(), format!("etiquetar {} {}", id, it.label), it.flag("etiqueta"), false, me());
     b.v
+}
+
+/// Ponta de cabo do lado da mídia: o conector da mídia retirada, ou o do item avulso (HD
+/// externo, pendrive, cartão).
+fn midia_alvo(sim: &Sim, mid: &str) -> Alvo {
+    if sim.equip.removed.contains(mid) {
+        return Alvo::Parte(format!("M.{}", mid), "porta".into());
+    }
+    let avulso = sim.case.items.iter().find(|it| it.slots.is_empty() && it.media.len() == 1 && it.media[0] == mid && crate::parts::tem(sim, it, "porta"));
+    match avulso {
+        Some(it) => Alvo::Parte(it.id.clone(), "porta".into()),
+        None => Alvo::Midia(mid.to_string()),
+    }
 }
 
 /// Vestígio não digital: sinalizar, fotografar com escala, comunicar (sem coletar).
@@ -264,8 +285,11 @@ mod t {
         assert_eq!(st[0].label, "Fotografar");
         assert_eq!(st[0].tool, Some(Tool::Camera));
         let no_item = |a: &Alvo| *a == Alvo::Objeto("ITEM-01".into());
-        // com a tesoura, romper o lacre ainda não: falta fotografar
-        match uso(&st, &no_item, Some(Tool::Tesoura), None) {
+        // romper e conferir o lacre acontecem mirando o próprio lacre (a peça), não o objeto
+        let no_lacre = |a: &Alvo| *a == Alvo::Parte("ITEM-01".into(), "lacre".into());
+        assert!(matches!(uso(&st, &no_item, Some(Tool::Tesoura), None), Uso::Nada(_)), "no corpo do objeto a tesoura não rompe o lacre");
+        // com a tesoura no lacre, romper ainda não: falta fotografar
+        match uso(&st, &no_lacre, Some(Tool::Tesoura), None) {
             Uso::Antes { quer, falta } => {
                 assert!(quer.cmd.starts_with("deslacrar"));
                 assert_eq!(falta.label, "Fotografar");
@@ -276,7 +300,7 @@ mod t {
         run(&mut s, "fotografar item-01");
         let st = steps_of(&s, "ITEM-01");
         assert!(st[0].done, "fotografia registrada na auditoria conta como feita");
-        match uso(&st, &no_item, Some(Tool::Oficio), None) {
+        match uso(&st, &no_lacre, Some(Tool::Oficio), None) {
             Uso::Fazer(x) => assert!(x.cmd.starts_with("lacre conferir")),
             _ => panic!("conferir o lacre está liberado"),
         }

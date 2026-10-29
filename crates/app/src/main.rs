@@ -20,6 +20,7 @@ mod exterior;
 mod interact;
 mod config;
 mod steps;
+mod parts;
 mod sfx;
 mod video;
 mod maleta;
@@ -814,13 +815,24 @@ fn hardware_inner(app: &mut App, area: Rect, modal: bool) {
     let aim = if app.player.captured { view.center() } else { app.ui.mouse };
     let (o, d) = world::ray(&cam, view, aim);
     let mut best: Option<(f32, usize)> = None;
+    let mut hits: Vec<(f32, usize)> = vec![];
     if view.contains(aim) && app.exam.is_none() {
         for (i, p) in wrld.picks.iter().enumerate() {
             if let Some(t) = world::ray_aabb(o, d, p.center, p.half) {
+                hits.push((t, i));
                 if best.map(|b| t < b.0).unwrap_or(true) {
                     best = Some((t, i));
                 }
             }
+        }
+    }
+    // peças (parafuso, conector, porta) vencem o objeto a que pertencem quando ficam logo
+    // atrás da superfície dele — mas não as do outro lado do objeto
+    if let Some((tb, ib)) = best {
+        let pai = wrld.picks[ib].id.clone();
+        let peca = hits.iter().filter(|(t, i)| parts::parent(&wrld.picks[*i].id).as_deref() == Some(pai.as_str()) && *t <= tb + 0.3).min_by(|a, b| a.0.total_cmp(&b.0)).copied();
+        if let Some(pc) = peca {
+            best = Some(pc);
         }
     }
     const REACH: f32 = interact::REACH;
@@ -930,7 +942,9 @@ fn hardware_inner(app: &mut App, area: Rect, modal: bool) {
     }
     // F: examinar (zoom girando em volta do objeto)
     if !typing && !modal && !was_exam && key(KeyCode::F) {
-        if let Some(p) = aimed.as_ref().filter(|p| !p.id.starts_with("T:") && p.id != "QUADRO" && p.id != "STATION") {
+        // numa peça, examina-se o objeto inteiro
+        let alvo = aimed.as_ref().map(|p| parts::parent(&p.id).and_then(|pai| wrld.picks.iter().find(|x| x.id == pai).cloned()).unwrap_or_else(|| p.clone()));
+        if let Some(p) = alvo.filter(|p| !p.id.starts_with("T:") && !p.id.starts_with("P:") && p.id != "QUADRO" && p.id != "STATION") {
             interact::start_exam(app, &p.id, p.center, p.half, cam.position);
         }
     }
@@ -952,11 +966,17 @@ fn hardware_inner(app: &mut App, area: Rect, modal: bool) {
                 interact::bench_use(app, &id);
             }
             Some(p) => {
-                sfx::interact(app, &p.id, p.center);
+                let som = parts::parent(&p.id).unwrap_or_else(|| p.id.clone());
+                sfx::interact(app, &som, p.center);
                 let hit = (o + d * best.map(|b| b.0).unwrap_or(1.0)).max(p.center - p.half).min(p.center + p.half);
                 if !interact::use_on(app, &p.id, hit) && p.id != "STATION" {
-                    // mãos livres e nada a fazer sem ferramenta: examinar
-                    interact::start_exam(app, &p.id, p.center, p.half, cam.position);
+                    // mãos livres e nada a fazer sem ferramenta: examinar (a peça → o objeto)
+                    let pai = parts::parent(&p.id).and_then(|pai| wrld.picks.iter().find(|x| x.id == pai).cloned());
+                    match pai {
+                        Some(x) => interact::start_exam(app, &x.id, x.center, x.half, cam.position),
+                        None if !p.id.starts_with("P:") => interact::start_exam(app, &p.id, p.center, p.half, cam.position),
+                        None => {}
+                    }
                 }
             }
             None if clicked && !app.player.captured => {
@@ -1809,7 +1829,7 @@ fn run_script(app: &mut App, sc: &mut Script) -> bool {
         },
         "aim" => {
             // vira a câmera para o centro de um alvo da cena ("aim T:camera", "aim ITEM-01")
-            let id = if arg.starts_with("T:") || arg.starts_with("M:") { arg.clone() } else { arg.to_uppercase() };
+            let id = if arg.starts_with("T:") || arg.starts_with("M:") || arg.starts_with("P:") { arg.clone() } else { arg.to_uppercase() };
             if let Some(c) = app.item_pos.get(&id).copied() {
                 let eye = app.player.eye();
                 let d = (c - eye).normalize_or_zero();

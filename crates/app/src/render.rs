@@ -791,6 +791,26 @@ impl Renderer {
         self.quad(mt.t, [tr(-x, y, -z), tr(-x, y, z), tr(-x, -y, z), tr(-x, -y, -z)], uvr(size.z, size.y), rn(vec3(-1., 0., 0.)), mt.c, mt.spec, mt.emis);
     }
 
+    /// Tubo fino de seção quadrada entre dois pontos (cabos): 4 faces laterais.
+    pub fn tube(&mut self, a: Vec3, b: Vec3, raio: f32, mt: M) {
+        let ax = b - a;
+        let len = ax.length();
+        if len < 1e-5 {
+            return;
+        }
+        let dir = ax / len;
+        let up = if dir.y.abs() > 0.9 { vec3(1.0, 0.0, 0.0) } else { vec3(0.0, 1.0, 0.0) };
+        let u = dir.cross(up).normalize() * raio;
+        let v = dir.cross(u).normalize() * raio;
+        let cs = [u + v, -u + v, -u - v, u - v];
+        let k = 1.0 / mt.tile.max(0.001);
+        for i in 0..4 {
+            let (p0, p1) = (cs[i], cs[(i + 1) % 4]);
+            let n = (p0 + p1).normalize_or_zero();
+            self.quad(mt.t, [a + p0, a + p1, b + p1, b + p0], [vec2(0.0, 0.0), vec2(raio * 2.0 * k, 0.0), vec2(raio * 2.0 * k, len * k), vec2(0.0, len * k)], n, mt.c, mt.spec, mt.emis);
+        }
+    }
+
     pub fn bx(&mut self, c: Vec3, size: Vec3, mt: M) {
         self.boxr(c, size, 0.0, mt);
     }

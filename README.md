@@ -70,8 +70,8 @@ Na página **Releases** do repositório há um pacote por sistema:
 ## Executar (Linux x86_64)
 
 ```bash
-tar xzf pericia-sim-0.10.0-linux-x86_64.tar.gz
-cd pericia-sim-0.10.0-linux-x86_64
+tar xzf pericia-sim-0.11.0-linux-x86_64.tar.gz
+cd pericia-sim-0.11.0-linux-x86_64
 ./pericia-sim          # rodar direto
 ./install.sh           # ou instalar no menu de aplicativos (sem sudo)
 ```
@@ -108,8 +108,9 @@ No Windows e no macOS o mesmo comando gera o executável nativo (`target/release
 2. Ajuste volume e controles em **⚙ Configurações**, se quiser. Leia o caso: tecla **T** (tablet → **Missão**) ou, na Estação, aplicativo **Caso**. O mentor fica no tablet, em **Apoio**.
 3. No **Ambiente**: **WASD** anda (Shift corre), olhe com o **mouse** (travado no centro; o ponto é a mira). **Esc** ou **Tab** soltam o mouse e um clique na cena trava de novo; ele fica livre sozinho no tablet, no quadro, no celular e na estação. **+ / −** ajustam a sensibilidade (também em *Configurações → Controles*, de 0,1× a 5×).
    * **Bancada de ferramentas** (laboratório: junto à parede da frente; local de busca: a mesa de apoio): cada ferramenta, a caixa de luvas e a pulseira são objetos soltos. **E** pega, **G** larga a ferramenta da mão onde você mirar (bancada, mesa de exame ou mesa da estação) — organize como quiser, a arrumação fica salva.
-   * **Usar**: com a ferramenta certa na mão, mire o objeto e aperte **E**: o jogo faz a próxima etapa da lista que aquela ferramenta faz ali. Fora de ordem, ele diz qual etapa falta e com que ferramenta. Com uma ferramenta na mão, **losangos amarelos** marcam cada componente onde ela serve agora.
-   * **Cabos**: **E** numa ponta (ex.: a mídia retirada) e depois **E** na outra (ex.: o bloqueador); a ponta que falta fica marcada em verde.
+   * **Usar, peça por peça**: com a ferramenta certa na mão, mire **a peça** e aperte **E**. Cada parafuso da tampa (na traseira do gabinete; embaixo do notebook, que fica fechado e virado depois de desligado e inspecionado), a tampa, o lacre, o botão de energia, a porta USB, a porta de rede, o conector de dados e o de energia de cada disco, cada parafuso do suporte e a própria mídia são alvos separados — o parafuso sai e some, o cabo desconectado fica solto. No celular: a porta de dados/carga, a gaveta do chip e a câmera frontal. Fotografar, inspecionar, isolar e embalar continuam no objeto inteiro. Fora de ordem, o jogo diz qual etapa falta, com que ferramenta e **em qual peça**. Com uma ferramenta na mão, **losangos amarelos** marcam cada peça onde ela serve agora.
+   * **Cabos, de porta a porta**: **E** no conector da mídia e depois **E** na porta certa do bloqueador (SATA, M.2, leitor SD ou entrada USB, na traseira e na lateral); o cabo USB vai da saída do bloqueador à porta USB frontal do gabinete da estação. A chave de proteção contra escrita fica em cima do bloqueador. Os cabos ligados aparecem na cena, de ponta a ponta.
+   * **Painel de tarefas** (canto superior esquerdo, semitransparente): o objetivo marcado e as etapas do objeto em foco, com a ferramenta de cada uma. **O** mostra/oculta.
    * **Examinar**: **F** aproxima a câmera do objeto (o mouse gira, a roda aproxima) e mostra o que está escrito nele — fabricante, nº de série, lacre, IMEI, estado. No celular, **Enter** mostra a tela.
    * **Objetivo**: no tablet → **Objeto**, cada objeto tem a lista de etapas na ordem; clique numa para marcá-la — ela aparece discretamente no canto da tela, com a ferramenta, e avança sozinha.
 4. Adquira a mídia (bloqueador → imagem → verificar hash) ou extraia o celular.
