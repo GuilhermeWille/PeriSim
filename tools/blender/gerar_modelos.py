@@ -56,6 +56,18 @@ MATERIAIS = {
     "livro_ocre": ((0.70, 0.59, 0.24), 0.8),
     "livro_roxo": ((0.35, 0.24, 0.43), 0.8),
     "livro_creme": ((0.88, 0.84, 0.74), 0.8),
+    "plastico_laranja": ((0.80, 0.28, 0.16), 0.5),
+    "plastico_vermelho": ((0.78, 0.20, 0.18), 0.5),
+    "plastico_azul": ((0.25, 0.45, 0.80), 0.45),
+    "plastico_branco": ((0.90, 0.90, 0.92), 0.5),
+    "metal_prata": ((0.70, 0.72, 0.76), 0.3),
+    "metal_rosado": ((0.78, 0.66, 0.68), 0.3),
+    "metal_dourado": ((0.82, 0.68, 0.30), 0.3),
+    "borracha_texturizada": ((0.09, 0.09, 0.10), 0.95),
+    "vidro_lente": ((0.10, 0.14, 0.20), 0.05),
+    "luz": ((1.0, 0.97, 0.88), 0.5),
+    "placa_verde": ((0.08, 0.35, 0.20), 0.6),
+    "tecido_cinza": ((0.35, 0.35, 0.37), 0.95),
 }
 
 
@@ -423,6 +435,130 @@ def planta():
     return m
 
 
+# =========================================================================== ferramentas de trabalho
+
+
+def camera_foto():
+    """Câmera fotográfica DSLR (≈ 14 × 10 × 11 cm): corpo com empunhadura, prisma, objetiva
+    voltada para a frente, botões e visor traseiro."""
+    m = Modelo("camera_foto")
+    m.caixa((0.14, 0.07, 0.09), (0, 0, 0.05), "borracha_texturizada", 0.012, segs=2)
+    m.caixa((0.04, 0.085, 0.095), (0.055, 0.008, 0.052), "borracha_texturizada", 0.015, segs=2)  # empunhadura
+    m.caixa((0.055, 0.055, 0.03), (-0.01, -0.005, 0.105), "plastico_preto", 0.008)  # prisma
+    m.caixa((0.035, 0.02, 0.012), (-0.01, -0.035, 0.112), "plastico_preto", 0.004)  # ocular
+    m.cilindro(0.036, 0.036, 0.05, (-0.008, 0.06, 0.05), "plastico_preto", segs=20, rot=(math.pi / 2, 0, 0))
+    m.cilindro(0.038, 0.038, 0.022, (-0.008, 0.075, 0.05), "borracha", segs=20, rot=(math.pi / 2, 0, 0))  # anel de foco
+    m.cilindro(0.03, 0.03, 0.004, (-0.008, 0.0875, 0.05), "vidro_lente", segs=20, rot=(math.pi / 2, 0, 0))
+    m.cilindro(0.007, 0.007, 0.006, (0.055, 0.02, 0.103), "metal_cromado", segs=10)  # disparador
+    m.cilindro(0.014, 0.014, 0.008, (-0.045, -0.005, 0.098), "plastico_escuro", segs=14)  # seletor de modos
+    m.caixa((0.075, 0.003, 0.05), (-0.012, -0.0365, 0.05), "tela")
+    for sx in (-1, 1):
+        m.caixa((0.008, 0.012, 0.014), (sx * 0.072, -0.01, 0.085), "metal_escuro", 0.002)  # alças
+    return m
+
+
+def bloqueador_escrita():
+    """Bloqueador de escrita (22 × 14 × 7 cm): carcaça laranja, portas de origem e destino
+    atrás, cabo SATA e etiqueta. Os LEDs são desenhados pelo jogo (indicam o estado)."""
+    m = Modelo("bloqueador_escrita")
+    m.caixa((0.22, 0.14, 0.064), (0, 0, 0.032), "plastico_laranja", 0.012, segs=2)
+    m.caixa((0.21, 0.13, 0.008), (0, 0, 0.066), "plastico_escuro", 0.004)
+    m.caixa((0.08, 0.05, 0.002), (-0.04, 0.0, 0.0705), "etiqueta")
+    for k, x in enumerate((-0.07, -0.02, 0.04)):
+        m.caixa((0.03 if k < 2 else 0.018, 0.006, 0.012), (x, -0.072, 0.032), "plastico_preto", 0.002)
+    m.cilindro(0.006, 0.006, 0.008, (0.08, -0.073, 0.032), "metal_cromado", segs=10, rot=(math.pi / 2, 0, 0))
+    # cabo SATA saindo para trás
+    m.caixa((0.012, 0.09, 0.004), (-0.07, -0.12, 0.012), "plastico_vermelho", 0.001, rot=(0.25, 0, 0.1))
+    for sx in (-1, 1):
+        for sy in (-1, 1):
+            m.cilindro(0.008, 0.008, 0.004, (sx * 0.09, sy * 0.055, 0.002), "borracha", segs=8)
+    return m
+
+
+def kit_embalagem():
+    """Material de acondicionamento: Faraday bag (bolsa metalizada dobrada com velcro),
+    saco antiestático, rolo de fita de lacre e bloco de lacres numerados."""
+    m = Modelo("kit_embalagem")
+    # Faraday bag
+    m.caixa((0.24, 0.17, 0.012), (-0.12, 0.0, 0.006), "metal_prata", 0.004, rot=(0, 0, -0.2))
+    m.caixa((0.22, 0.05, 0.004), (-0.135, 0.055, 0.014), "tecido_cinza", 0.001, rot=(0, 0, -0.2))  # aba com velcro
+    # saco antiestático
+    m.caixa((0.2, 0.14, 0.008), (0.15, -0.02, 0.004), "metal_rosado", 0.002, rot=(0, 0, 0.3))
+    m.caixa((0.19, 0.006, 0.0015), (0.13, 0.026, 0.0085), "plastico_branco", rot=(0, 0, 0.3))  # fecho zip
+    # rolo de fita de lacre
+    m.cilindro(0.045, 0.045, 0.05, (0.36, 0.03, 0.025), "plastico_vermelho", segs=20)
+    m.cilindro(0.021, 0.021, 0.052, (0.36, 0.03, 0.025), "plastico_branco", segs=14)
+    # bloco de lacres numerados
+    m.caixa((0.07, 0.05, 0.012), (0.33, -0.07, 0.006), "etiqueta", 0.002)
+    return m
+
+
+def luminaria_bancada():
+    """Luminária articulada de bancada: base pesada, coluna, braço e cabeça com difusor."""
+    m = Modelo("luminaria_bancada")
+    m.cilindro(0.07, 0.075, 0.025, (0, 0, 0.0125), "metal_escuro", segs=20)
+    m.cilindro(0.012, 0.012, 0.45, (0, 0, 0.25), "metal_escuro", segs=10)
+    m.cilindro(0.02, 0.02, 0.03, (0, 0, 0.47), "plastico_preto", segs=12, rot=(0, math.pi / 2, 0))
+    # braço até a cabeça (no jogo: 0,3 m para -X e 0,15 m para a frente; no Blender X é espelhado)
+    ang = math.atan2(0.15, 0.3)
+    m.caixa((0.34, 0.016, 0.016), (0.15, 0.075, 0.47), "metal_escuro", 0.004, rot=(0, 0, ang))
+    m.caixa((0.15, 0.1, 0.06), (0.3, 0.15, 0.43), "metal_escuro", 0.01, rot=(0, 0, ang))
+    m.caixa((0.13, 0.08, 0.004), (0.3, 0.15, 0.398), "luz", rot=(0, 0, ang))
+    return m
+
+
+def teclado():
+    """Teclado ABNT2 (44 × 14 cm): carcaça com leve inclinação; teclas vêm da textura."""
+    m = Modelo("teclado")
+    m.caixa((0.44, 0.14, 0.018), (0, 0, 0.011), "plastico_preto", 0.005, rot=(0.05, 0, 0))
+    m.caixa((0.42, 0.12, 0.004), (0, -0.002, 0.021), "teclado", rot=(0.05, 0, 0))
+    for sx in (-1, 1):
+        m.caixa((0.03, 0.012, 0.006), (sx * 0.19, -0.06, 0.003), "borracha")
+    return m
+
+
+def mouse():
+    """Mouse óptico: corpo arredondado em duas metades e roda."""
+    m = Modelo("mouse")
+    m.caixa((0.06, 0.105, 0.03), (0, 0, 0.016), "plastico_preto", 0.013, segs=3)
+    m.caixa((0.002, 0.04, 0.002), (0, 0.03, 0.0315), "plastico_escuro")
+    m.cilindro(0.007, 0.007, 0.006, (0, 0.028, 0.032), "borracha", segs=10, rot=(0, math.pi / 2, 0))
+    return m
+
+
+def hd_35():
+    """Disco rígido 3,5" (102 × 147 × 26 mm): tampa com etiqueta, base fundida, placa
+    lógica, conectores SATA (atrás) e parafusos."""
+    m = Modelo("hd_35")
+    w, d, h = 0.102, 0.147, 0.026
+    m.caixa((w, d, h - 0.003), (0, 0, (h - 0.003) / 2 + 0.002), "metal_prata", 0.002)
+    m.caixa((w - 0.004, d - 0.004, 0.002), (0, 0, 0.001), "placa_verde")
+    m.caixa((0.085, 0.095, 0.0006), (0, 0.012, h - 0.0007), "etiqueta")
+    m.caixa((0.07, 0.006, 0.012), (0, -d / 2 - 0.002, 0.008), "plastico_preto")
+    for x in (-0.04, 0.04):
+        for y in (-0.06, 0.06):
+            m.cilindro(0.003, 0.003, 0.001, (x, y, h - 0.0005), "metal_escuro", segs=8)
+    return m
+
+
+def ssd_25():
+    """SSD 2,5" (70 × 100 × 7 mm) com etiqueta e conector SATA."""
+    m = Modelo("ssd_25")
+    m.caixa((0.07, 0.1, 0.007), (0, 0, 0.0035), "metal_escuro", 0.0015)
+    m.caixa((0.06, 0.07, 0.0005), (0, 0.008, 0.0072), "etiqueta")
+    m.caixa((0.04, 0.004, 0.005), (0, -0.0515, 0.0035), "plastico_preto")
+    return m
+
+
+def pendrive():
+    """Pendrive (55 × 20 × 12 mm): corpo plástico, conector USB metálico e argola."""
+    m = Modelo("pendrive")
+    m.caixa((0.046, 0.02, 0.012), (-0.004, 0, 0.006), "plastico_azul", 0.004, segs=2)
+    m.caixa((0.018, 0.0125, 0.0045), (-0.036, 0, 0.006), "metal_cromado", 0.0005)  # no jogo, +X
+    m.cilindro(0.005, 0.005, 0.003, (0.022, 0, 0.006), "metal_escuro", segs=10, rot=(math.pi / 2, 0, 0))
+    return m
+
+
 MODELOS = [
     cadeira_escritorio,
     lambda: mesa("mesa_escritorio", 1.8, 0.76, 0.8, tampo="madeira", pes="madeira_escura", pes_madeira=True),
@@ -437,6 +573,15 @@ MODELOS = [
     estante_livros,
     gaveteiro,
     planta,
+    camera_foto,
+    bloqueador_escrita,
+    kit_embalagem,
+    luminaria_bancada,
+    teclado,
+    mouse,
+    hd_35,
+    ssd_25,
+    pendrive,
 ]
 
 

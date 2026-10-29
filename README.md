@@ -50,8 +50,8 @@ Cada botão gera um **comando do terminal** (que aparece no terminal), então vo
 ## Executar (Linux x86_64)
 
 ```bash
-tar xzf pericia-sim-0.5.0-linux-x86_64.tar.gz
-cd pericia-sim-0.5.0-linux-x86_64
+tar xzf pericia-sim-0.5.1-linux-x86_64.tar.gz
+cd pericia-sim-0.5.1-linux-x86_64
 ./pericia-sim          # rodar direto
 ./install.sh           # ou instalar no menu de aplicativos (sem sudo)
 ```
@@ -85,7 +85,7 @@ Atalhos do terminal: ↑/↓ histórico, `limpar`, Ctrl+V cola. No editor e nos 
 
 ## Modelos 3D e texturas
 
-Os móveis e equipamentos principais (cadeiras, mesas, monitor, gabinete, notebook, celular, bancada, armário, estantes, gaveteiro e planta) são modelos 3D feitos no **Blender 5.2** por script (`tools/blender/gerar_modelos.py`), com a fonte editável em `assets/blender/modelos.blend`. Sem a pasta `assets/`, o jogo volta à geometria procedural. Veja `assets/LEIA-ME.md`. Resumo: texturas PNG/TGA em `assets/textures/<nome>.png` substituem as procedurais (validadas: potência de 2, até 2048 px); modelos OBJ/MTL em `assets/models/` são lidos e validados (relatório em `assets_relatorio.txt` na pasta de dados). O inventário dos arquivos recebidos sai de `cargo run --release -p pericia_core --example asset_inventory -- <pasta> <saida.md>` (somente leitura, com SHA‑256 de cada original).
+Os móveis, equipamentos e objetos de trabalho (cadeiras, mesas, monitor, gabinete, notebook, celular, bancada, armário, estantes, gaveteiro, planta, câmera, bloqueador de escrita, kit de embalagem, luminária, teclado, mouse, HD, SSD e pendrive) são modelos 3D feitos no **Blender 5.2** por script (`tools/blender/gerar_modelos.py`), com a fonte editável em `assets/blender/modelos.blend`. Sem a pasta `assets/`, o jogo volta à geometria procedural. Veja `assets/LEIA-ME.md`. Resumo: texturas PNG/TGA em `assets/textures/<nome>.png` substituem as procedurais (validadas: potência de 2, até 2048 px); modelos OBJ/MTL em `assets/models/` são lidos e validados (relatório em `assets_relatorio.txt` na pasta de dados). O inventário dos arquivos recebidos sai de `cargo run --release -p pericia_core --example asset_inventory -- <pasta> <saida.md>` (somente leitura, com SHA‑256 de cada original).
 
 ## Arquivos gerados
 

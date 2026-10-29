@@ -4,7 +4,7 @@ Esta pasta guarda os modelos 3D do Perícia Sim e recebe texturas/modelos fornec
 
 ## Modelos incluídos (gerados no Blender 5.2)
 
-`models/` traz 13 modelos OBJ/MTL gerados pelo script `tools/blender/gerar_modelos.py`; a fonte editável é `blender/modelos.blend`. Cerca de 9 100 triângulos no total.
+`models/` traz 22 modelos OBJ/MTL gerados pelo script `tools/blender/gerar_modelos.py`; a fonte editável é `blender/modelos.blend`. Cerca de 11 600 triângulos no total.
 
 | Arquivo | Onde aparece | Triângulos |
 |---|---|---|
@@ -21,6 +21,15 @@ Esta pasta guarda os modelos 3D do Perícia Sim e recebe texturas/modelos fornec
 | `estante_livros` | estante com livros do escritório | 2 284 |
 | `gaveteiro` | gaveteiro com a gaveta aberta | 444 |
 | `planta` | planta do escritório | 564 |
+| `camera_foto` | câmera fotográfica do perito | 720 |
+| `bloqueador_escrita` | bloqueador de escrita (os LEDs de estado são do jogo) | 488 |
+| `kit_embalagem` | Faraday bag, saco antiestático, fita e lacres | 316 |
+| `luminaria_bancada` | luminária articulada da bancada | 254 |
+| `teclado` | teclados da estação e dos computadores ligados no local | 80 |
+| `mouse` | mouse da estação | 236 |
+| `hd_35` | HDs apreendidos e HDs dentro de gabinetes abertos | 190 |
+| `ssd_25` | SSDs apreendidos | 68 |
+| `pendrive` | pendrives apreendidos | 188 |
 
 Para regenerar depois de editar o script: `python3 tools/blender/gerar_modelos.py assets` (com o módulo `bpy`) ou `blender --background --python tools/blender/gerar_modelos.py -- assets`. Prévias renderizadas: `python3 tools/blender/renderizar_previas.py assets <pasta>`.
 

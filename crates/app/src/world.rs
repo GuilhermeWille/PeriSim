@@ -225,8 +225,12 @@ pub fn workstation(r: &mut Renderer, c: Vec3, w: &mut World) {
         r.bx(vec3(c.x + 0.58, top + 0.23, c.z + 0.171), vec3(0.17, 0.42, 0.003), m(Tex::Vent, WHITE, 0.08, 0.2));
         r.bx(vec3(c.x + 0.52, top + 0.42, c.z + 0.174), vec3(0.012, 0.012, 0.003), glow(rgb(60, 220, 120)));
     }
-    r.bx(vec3(c.x - 0.02, top + 0.012, c.z + 0.17), vec3(0.44, 0.022, 0.14), m(Tex::Keyboard, WHITE, 0.07, 0.2));
-    r.bx(vec3(c.x + 0.32, top + 0.012, c.z + 0.18), vec3(0.06, 0.024, 0.1), plastic(rgb(36, 36, 40)));
+    if !r.model("teclado", vec3(c.x - 0.02, top, c.z + 0.17), 0.0, &[]) {
+        r.bx(vec3(c.x - 0.02, top + 0.012, c.z + 0.17), vec3(0.44, 0.022, 0.14), m(Tex::Keyboard, WHITE, 0.07, 0.2));
+    }
+    if !r.model("mouse", vec3(c.x + 0.32, top, c.z + 0.18), 0.0, &[]) {
+        r.bx(vec3(c.x + 0.32, top + 0.012, c.z + 0.18), vec3(0.06, 0.024, 0.1), plastic(rgb(36, 36, 40)));
+    }
     // bloqueador de escrita da estação
     r.bx(vec3(c.x - 0.55, top + 0.03, c.z + 0.05), vec3(0.16, 0.05, 0.1), plastic(rgb(200, 70, 40)));
     chair(r, vec3(c.x, 0.0, c.z + 0.7), 0.0);
@@ -254,11 +258,14 @@ fn lab(r: &mut Renderer, w: &mut World) {
         }
     }
     // lâmpada articulada da bancada
+    let lamp_model = r.model("luminaria_bancada", bench_c + vec3(1.1, 0.905, -0.4), 0.0, &[]);
+    if !lamp_model {
     r.cyl(bench_c + vec3(1.1, 0.92, -0.4), 0.07, 0.02, metal(rgb(60, 62, 68)));
     r.bx(bench_c + vec3(1.1, 1.15, -0.4), vec3(0.02, 0.46, 0.02), metal(rgb(60, 62, 68)));
     r.bx(bench_c + vec3(0.95, 1.37, -0.3), vec3(0.3, 0.02, 0.02), metal(rgb(60, 62, 68)));
     r.bx(bench_c + vec3(0.8, 1.33, -0.25), vec3(0.14, 0.06, 0.1), metal(rgb(60, 62, 68)));
     r.bx(bench_c + vec3(0.8, 1.298, -0.25), vec3(0.12, 0.005, 0.08), glow(rgb(255, 248, 225)));
+    }
     w.colliders.push(col((-1.32, -1.0), (1.32, 0.1)));
     // estação pericial junto à parede do fundo
     workstation(r, vec3(-1.6, 0.0, -2.5), w);
@@ -368,6 +375,12 @@ fn office(r: &mut Renderer, w: &mut World) {
 // ------------------------------------------------------------------ ferramentas
 
 fn tool_writeblocker(r: &mut Renderer, at: Vec3, on: bool) {
+    if r.model("bloqueador_escrita", at, 0.0, &[]) {
+        // LEDs de estado (energia / atividade) por cima do modelo
+        r.bx(at + vec3(-0.06, 0.071, 0.06), vec3(0.016, 0.003, 0.01), if on { glow(rgb(60, 240, 110)) } else { plain(rgb(40, 60, 40)) });
+        r.bx(at + vec3(-0.03, 0.071, 0.06), vec3(0.016, 0.003, 0.01), if on { glow(rgb(250, 190, 40)) } else { plain(rgb(60, 50, 30)) });
+        return;
+    }
     r.bx(at + vec3(0.0, 0.035, 0.0), vec3(0.22, 0.07, 0.14), plastic(rgb(205, 72, 40)));
     r.bx(at + vec3(-0.06, 0.071, 0.06), vec3(0.018, 0.004, 0.012), if on { glow(rgb(60, 240, 110)) } else { plain(rgb(40, 60, 40)) });
     r.bx(at + vec3(-0.03, 0.071, 0.06), vec3(0.018, 0.004, 0.012), if on { glow(rgb(250, 190, 40)) } else { plain(rgb(60, 50, 30)) });
@@ -375,6 +388,9 @@ fn tool_writeblocker(r: &mut Renderer, at: Vec3, on: bool) {
 }
 
 fn tool_camera(r: &mut Renderer, at: Vec3) {
+    if r.model("camera_foto", at, 0.0, &[]) {
+        return;
+    }
     r.bx(at + vec3(0.0, 0.05, 0.0), vec3(0.15, 0.10, 0.08), plastic(rgb(30, 30, 34)));
     r.bx(at + vec3(-0.04, 0.105, 0.0), vec3(0.05, 0.02, 0.05), plastic(rgb(30, 30, 34)));
     r.boxr(at + vec3(0.0, 0.05, 0.06), vec3(0.07, 0.07, 0.05), 0.0, metal(rgb(50, 50, 56)));
@@ -382,6 +398,9 @@ fn tool_camera(r: &mut Renderer, at: Vec3) {
 }
 
 fn tool_bags(r: &mut Renderer, at: Vec3) {
+    if r.model("kit_embalagem", at, 0.0, &[]) {
+        return;
+    }
     r.boxr(at + vec3(-0.12, 0.006, 0.0), vec3(0.24, 0.012, 0.17), 0.2, metal(rgb(150, 160, 170)));
     r.boxr(at + vec3(0.16, 0.012, 0.02), vec3(0.2, 0.02, 0.14), -0.3, m(Tex::Fabric, rgb(90, 90, 90), 0.1, 0.1));
     r.cyl(at + vec3(0.36, 0.03, -0.03), 0.045, 0.06, plastic(rgb(220, 60, 50)));
@@ -400,8 +419,10 @@ fn draw_item(r: &mut Renderer, sim: &Sim, it: &Item, base: Vec3) -> Vec3 {
             vec3(0.06, 0.03, 0.08)
         }
         ItemKind::Ssd => {
-            r.bx(base + vec3(0.0, 0.0035, 0.0), vec3(0.07, 0.007, 0.1), metal(rgb(60, 64, 72)));
-            r.bx(base + vec3(0.0, 0.0072, 0.0), vec3(0.06, 0.0005, 0.07), m(Tex::Label, WHITE, 0.07, 0.0));
+            if !r.model("ssd_25", base, 0.0, &[]) {
+                r.bx(base + vec3(0.0, 0.0035, 0.0), vec3(0.07, 0.007, 0.1), metal(rgb(60, 64, 72)));
+                r.bx(base + vec3(0.0, 0.0072, 0.0), vec3(0.06, 0.0005, 0.07), m(Tex::Label, WHITE, 0.07, 0.0));
+            }
             vec3(0.05, 0.02, 0.06)
         }
         ItemKind::Nvme => {
@@ -409,8 +430,10 @@ fn draw_item(r: &mut Renderer, sim: &Sim, it: &Item, base: Vec3) -> Vec3 {
             vec3(0.05, 0.02, 0.03)
         }
         ItemKind::Pendrive => {
-            r.bx(base + vec3(0.0, 0.006, 0.0), vec3(0.055, 0.012, 0.02), plastic(rgb(70, 120, 200)));
-            r.bx(base + vec3(0.036, 0.006, 0.0), vec3(0.018, 0.0045, 0.012), metal(rgb(200, 200, 206)));
+            if !r.model("pendrive", base, 0.0, &[]) {
+                r.bx(base + vec3(0.0, 0.006, 0.0), vec3(0.055, 0.012, 0.02), plastic(rgb(70, 120, 200)));
+                r.bx(base + vec3(0.036, 0.006, 0.0), vec3(0.018, 0.0045, 0.012), metal(rgb(200, 200, 206)));
+            }
             if it.physical.camouflaged.is_some() {
                 r.cyl(base + vec3(-0.045, 0.006, 0.0), 0.014, 0.01, plastic(rgb(200, 180, 60)));
             }
@@ -428,6 +451,12 @@ fn seal(r: &mut Renderer, c: Vec3, size: Vec3, intact: bool) {
 }
 
 fn hdd(r: &mut Renderer, at: Vec3, sealed: bool) {
+    if r.model("hd_35", at - vec3(0.0, 0.013, 0.0), 0.0, &[]) {
+        if sealed {
+            seal(r, at + vec3(0.0, 0.0142, -0.02), vec3(0.11, 0.0006, 0.02), true);
+        }
+        return;
+    }
     r.bx(at, vec3(0.102, 0.026, 0.147), metal(rgb(170, 175, 182)));
     r.bx(at + vec3(0.0, 0.0132, 0.012), vec3(0.085, 0.0005, 0.095), m(Tex::Label, WHITE, 0.09, 0.0));
     r.bx(at + vec3(0.0, -0.002, -0.074), vec3(0.07, 0.012, 0.003), plain(rgb(25, 25, 25)));
@@ -518,7 +547,9 @@ fn tower_live(r: &mut Renderer, it: &Item, base: Vec3) {
         let mounted = it.live.as_ref().map(|l| l.mounted_encrypted.is_some()).unwrap_or(false);
         let scr = glow(if mounted { rgb(70, 140, 210) } else { rgb(30, 40, 60) });
         monitor(r, base + vec3(-0.42, 0.0, -0.05), scr, 1.0);
-        r.bx(base + vec3(-0.15, 0.011, 0.25), vec3(0.42, 0.022, 0.14), m(Tex::Keyboard, WHITE, 0.07, 0.2));
+        if !r.model("teclado", base + vec3(-0.15, 0.0, 0.25), 0.0, &[]) {
+            r.bx(base + vec3(-0.15, 0.011, 0.25), vec3(0.42, 0.022, 0.14), m(Tex::Keyboard, WHITE, 0.07, 0.2));
+        }
         if it.live.as_ref().map(|l| l.network_connected).unwrap_or(false) {
             r.bx(base + vec3(0.0, 0.005, -0.55), vec3(0.008, 0.008, 0.6), plastic(rgb(60, 120, 220)));
         }
