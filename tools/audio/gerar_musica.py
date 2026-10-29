@@ -1,8 +1,14 @@
-"""Gera a música ambiente do Perícia Sim: jazz noir, lento, em ré menor (composição e
-síntese originais — nada é amostrado de gravações).
+"""Gera a música ambiente do Perícia Sim: jazz noir (composição e síntese originais — nada
+é amostrado de gravações). O mesmo tema em três versões, tocadas pelo jogo em ordem aleatória:
 
-Uso: python3 tools/audio/gerar_musica.py <pasta_assets>
-Saída: <pasta_assets>/sounds/musica_noir.wav — estéreo, 22,05 kHz, 16 bits, em loop sem emenda.
+  1. musica_noir.wav    — "Arquivo": 76 bpm, ré menor, sax tenor e vassourinhas (original)
+  2. musica_noir_2.wav  — "Madrugada": balada a 62 bpm, dó menor, trompete com surdina harmon,
+                          piano esparso, vassourinhas leves, sala mais reverberante
+  3. musica_noir_3.wav  — "Chuva": 96 bpm, sol menor, vibrafone na melodia, baquetas no prato
+                          de condução com notas fantasma na caixa, piano mais ativo, chuva ao fundo
+
+Uso: python3 tools/audio/gerar_musica.py <pasta_assets> [1 2 3]   (sem números: as três)
+Saída: <pasta_assets>/sounds/musica_noir*.wav — estéreo, 22,05 kHz, 16 bits, em loop sem emenda.
 
 Formação: contrabaixo em walking, bateria com vassourinhas (caixa varrida, prato de condução
 em swing, chimbal no 2 e no 4), piano elétrico (FM) em acordes sem fundamental e um sax
@@ -22,6 +28,23 @@ BPM = 76.0
 BEAT = 60.0 / BPM
 SWING = 2.0 / 3.0  # colcheia "atrasada": a segunda colcheia cai em 2/3 do tempo
 rng = np.random.default_rng(1949)
+
+VERSOES = {
+    1: dict(arquivo="musica_noir.wav", bpm=76.0, tp=0, solo="sax", bateria="vassourinha", piano="charleston", rt=1.9, chuva=False, seed=1949),
+    2: dict(arquivo="musica_noir_2.wav", bpm=62.0, tp=-2, solo="trompete", bateria="suave", piano="esparso", rt=2.7, chuva=False, seed=1962, ganho_db=-2.0),
+    3: dict(arquivo="musica_noir_3.wav", bpm=96.0, tp=5, solo="vibrafone", bateria="baquetas", piano="ativo", rt=1.6, chuva=True, seed=1996, ganho_db=0.4),
+}
+V = VERSOES[1]
+
+
+def aplicar(v):
+    """Ajusta andamento, swing e semente globais para a versão."""
+    global BPM, BEAT, TOTAL, rng, V
+    V = v
+    BPM = v["bpm"]
+    BEAT = 60.0 / BPM
+    TOTAL = BARS * 4 * BEAT
+    rng = np.random.default_rng(v["seed"])
 
 
 def midi_hz(m):
@@ -192,6 +215,68 @@ def reverb_ir(rt=1.9, seed=3):
     return irs
 
 
+def trompete(notes_time, total_n):
+    """Trompete com surdina harmon: timbre fino e nasal, pouco vibrato, ataque com "língua"."""
+    out = np.zeros(total_n)
+    for (t0, dur, m, vel) in notes_time:
+        f = midi_hz(m)
+        n = int((dur + 0.12) * SR)
+        t = np.arange(n) / SR
+        bend = -0.25 * np.exp(-t / 0.03)
+        vib = 0.08 * np.sin(2 * np.pi * 5.8 * t) * np.clip((t - 0.35) / 0.3, 0, 1)
+        ph = 2 * np.pi * np.cumsum(f * 2 ** ((bend + vib) / 12)) / SR
+        nh = int(min(28, 7000 / f))
+        x = np.zeros(n)
+        for h in range(1, nh + 1):
+            x += (1.0 / h ** 0.8) * np.sin(h * ph)
+        att = np.minimum(1, t / 0.02)
+        rel = np.where(t < dur, 1.0, np.exp(-(t - dur) / 0.04))
+        env = att * rel * (0.8 + 0.2 * np.minimum(1, t / 0.5)) * vel
+        lingua = band(rng.standard_normal(n), 2000, 6000) * np.exp(-t / 0.012) * 0.25
+        place(out, x * env + lingua * vel, t0)
+    # surdina harmon: corta graves e realça a região de 1,5 a 3 kHz
+    y = band(out, 1300, 3300, order=3) * 1.0 + band(out, 700, 1100) * 0.35
+    return band(y, hi=6500)
+
+
+def vibrafone(notes_time, total_n):
+    """Vibrafone: barras de metal (parciais 1 e 4) com motor do tremolo e baqueta macia."""
+    out = np.zeros(total_n)
+    for (t0, dur, m, vel) in notes_time:
+        f = midi_hz(m)
+        ring = max(dur, 0.6) + 1.4
+        n = int(ring * SR)
+        t = np.arange(n) / SR
+        x = np.sin(2 * np.pi * f * t) * np.exp(-t / 1.6) + 0.22 * np.sin(2 * np.pi * f * 4.0 * t) * np.exp(-t / 0.25)
+        x += 0.08 * np.sin(2 * np.pi * f * 10.0 * t) * np.exp(-t / 0.03)  # baqueta
+        motor = 1 + 0.35 * np.sin(2 * np.pi * 5.5 * t)
+        abafa = np.where(t < dur + 0.25, 1.0, np.exp(-(t - dur - 0.25) / 0.15))  # pedal solto depois da nota
+        place(out, x * motor * abafa * np.minimum(1, t / 0.002) * vel, t0)
+    return band(out, 150, 9000)
+
+
+def caixa_fantasma():
+    n = int(0.15 * SR)
+    t = np.arange(n) / SR
+    corpo = np.sin(2 * np.pi * 190 * t) * np.exp(-t / 0.03) * 0.5
+    esteira = band(rng.standard_normal(n), 1800, 8000) * np.exp(-t / 0.05)
+    return corpo + esteira
+
+
+def chuva(n):
+    """Chuva fina na janela: ruído rosa filtrado com gotas esparsas, em estéreo."""
+    out = []
+    for c in range(2):
+        r = np.random.default_rng(77 + c)
+        x = band(r.standard_normal(n), 400, 6000) * 0.010
+        gotas = np.zeros(n)
+        for i in r.integers(0, n, int(n / SR * 9)):
+            gotas[i] = r.uniform(0.3, 1.0)
+        x += band(gotas, 2500, 9000) * 0.018
+        out.append(x)
+    return out
+
+
 # ------------------------------------------------------------------ arranjo
 
 def walking(bar_idx):
@@ -224,29 +309,50 @@ def render():
     for b in range(BARS):
         base = b * 4
         # contrabaixo (no último compasso do loop, prepara a volta ao Dm9)
+        tp = V["tp"]
         for k, m in enumerate(walking(b)):
-            place(bass, contrabaixo(midi_hz(m), BEAT * 0.92), t_of(base + k), 0.9 + 0.1 * (k == 0))
+            # transposições para cima descem uma oitava no baixo (fica na região do contrabaixo)
+            mb = m + tp - (12 if tp > 2 else 0)
+            place(bass, contrabaixo(midi_hz(mb), BEAT * 0.92), t_of(base + k), 0.9 + 0.1 * (k == 0))
+        estilo = V["bateria"]
         # bateria: condução 1, 2, 2a, 3, 4, 4a (swing) e chimbal no 2 e 4
-        for pos, g in [(0, 0.55), (1, 0.7), (1.5, 0.4), (2, 0.55), (3, 0.7), (3.5, 0.4)]:
-            place(drumsR, ride, t_of(base + pos), g * 0.22 * (1 + rng.uniform(-0.1, 0.1)))
+        if estilo != "suave":
+            gr = 0.32 if estilo == "baquetas" else 0.22
+            for pos, g in [(0, 0.55), (1, 0.7), (1.5, 0.4), (2, 0.55), (3, 0.7), (3.5, 0.4)]:
+                place(drumsR, ride, t_of(base + pos), g * gr * (1 + rng.uniform(-0.1, 0.1)))
         for pos in (1, 3):
-            place(drumsL, chimbal_pe(), t_of(base + pos), 0.12)
-            place(drumsL, vassourinha_tapa(), t_of(base + pos), 0.22)
-        for pos in range(4):
-            place(drumsL, bumbo_pena(), t_of(base + pos), 0.05)
-        # varrida contínua da vassourinha (círculos, um por tempo)
-        seg = int(4 * BEAT * SR)
-        t = np.arange(seg) / SR
-        sw = band(rng.standard_normal(seg), 1500, 8000) * (0.5 + 0.5 * np.abs(np.sin(np.pi * t / BEAT))) * 0.035
-        place(drumsL, sw, t_of(base))
+            place(drumsL, chimbal_pe(), t_of(base + pos), 0.16 if estilo == "baquetas" else 0.12)
+            if estilo != "baquetas":
+                place(drumsL, vassourinha_tapa(), t_of(base + pos), 0.12 if estilo == "suave" else 0.22)
+        if estilo == "baquetas":
+            # notas fantasma na caixa (baqueta) e bumbo marcando 1 e 3
+            for pos in (0.5, 1.5, 2.5, 3.5):
+                if rng.uniform() < 0.55:
+                    place(drumsL, caixa_fantasma(), t_of(base + pos), rng.uniform(0.05, 0.09))
+            if b % 4 == 3:
+                place(drumsL, caixa_fantasma(), t_of(base + 3.5), 0.22)
+            for pos in (0, 2):
+                place(drumsL, bumbo_pena(), t_of(base + pos), 0.14)
+        else:
+            for pos in range(4):
+                place(drumsL, bumbo_pena(), t_of(base + pos), 0.05)
+            # varrida contínua da vassourinha (círculos, um por tempo)
+            seg = int(4 * BEAT * SR)
+            t = np.arange(seg) / SR
+            sw = band(rng.standard_normal(seg), 1500, 8000) * (0.5 + 0.5 * np.abs(np.sin(np.pi * t / BEAT))) * (0.022 if estilo == "suave" else 0.035)
+            place(drumsL, sw, t_of(base))
         # piano elétrico: Charleston e antecipações, sem fundamental
         _, _, voic = CH[FORMA[b]]
         ritmos = [(0, 1.2, 0.8), (1.5, 0.4, 0.6)] if b % 2 == 0 else [(0.5, 0.4, 0.55), (2.5, 1.2, 0.7)]
+        if V["piano"] == "esparso":
+            ritmos = [(0, 3.6, 0.7)] if b % 2 == 0 else [(0, 1.8, 0.6), (2.5, 1.2, 0.5)]
+        elif V["piano"] == "ativo":
+            ritmos = [(0, 0.8, 0.75), (1.5, 0.4, 0.6), (2.5, 0.4, 0.55), (3.5, 0.4, 0.6)] if b % 2 == 0 else [(0.5, 0.4, 0.6), (1.5, 0.8, 0.65), (3.0, 0.8, 0.6)]
         if b < 4 or b >= BARS - 4:
             ritmos = [(0, 3.5, 0.75)]
         for pos, d, vel in ritmos:
             for m in voic:
-                place(piano, rhodes(midi_hz(m), d * BEAT, vel), t_of(base + pos) + rng.uniform(0, 0.012), 0.11)
+                place(piano, rhodes(midi_hz(m + V["tp"] - (12 if V["tp"] > 2 else 0)), d * BEAT, vel), t_of(base + pos) + rng.uniform(0, 0.012), 0.11)
     # melodia do sax por seção
     sec_start = {"A1": 4, "A2": 12, "B": 20, "A3": 28}
     notas = []
@@ -257,7 +363,10 @@ def render():
             notas.append((t_of(ini * 4 + pos), d * BEAT * 0.97, m, float(np.clip(vel, 0.6, 1.0))))
     # final: frase curta e nota longa no Dm9
     notas += [(t_of(36 * 4 + 1.0), 0.67 * BEAT, 57, 0.7), (t_of(36 * 4 + 1.67), 0.33 * BEAT, 60, 0.7), (t_of(36 * 4 + 2.0), 5.0 * BEAT, 62, 0.75)]
-    sx = sax(notas, n)
+    # transposição e região do solista (trompete uma oitava acima do sax; vibrafone também)
+    oit = {"sax": 0, "trompete": 12, "vibrafone": 12}[V["solo"]]
+    notas = [(t0, d, m + V["tp"] + oit - (12 if V["tp"] > 2 else 0), vel) for (t0, d, m, vel) in notas]
+    sx = {"sax": sax, "trompete": trompete, "vibrafone": vibrafone}[V["solo"]](notas, n)
 
     # equilíbrio por intensidade (RMS dos trechos ativos): o sax à frente, o contrabaixo
     # firme logo abaixo, piano e bateria como cama
@@ -278,7 +387,11 @@ def render():
     # mixagem com posicionamento estéreo
     L += bass * 0.7 + piano * 0.75 + drumsL * 1.0 + drumsR * 0.5 + sx * 0.9
     R += bass * 0.7 + piano * 1.0 + drumsL * 0.6 + drumsR * 1.0 + sx * 0.7
-    irL, irR = reverb_ir()
+    if V["chuva"]:
+        chv = chuva(n)
+        L += chv[0]
+        R += chv[1]
+    irL, irR = reverb_ir(V["rt"])
     wetL = signal.fftconvolve(L, irL)[:n]
     wetR = signal.fftconvolve(R, irR)[:n]
     L = L + wetL * 0.28
@@ -309,15 +422,21 @@ def render():
 def main():
     out = os.path.join(sys.argv[1] if len(sys.argv) > 1 else "assets", "sounds")
     os.makedirs(out, exist_ok=True)
-    st = render()
-    st = signal.resample_poly(st, 1, 2, axis=1)  # 22,05 kHz basta para o clima de disco antigo
-    data = (np.clip(st, -1, 1) * 32767).astype("<i2").T.reshape(-1)
-    with wave.open(os.path.join(out, "musica_noir.wav"), "wb") as w:
-        w.setnchannels(2)
-        w.setsampwidth(2)
-        w.setframerate(SR // 2)
-        w.writeframes(data.tobytes())
-    print("música: %d compassos, %.1f s, pico %.1f dBFS" % (BARS, TOTAL, 20 * np.log10(np.abs(st).max())))
+    quais = [int(x) for x in sys.argv[2:]] or sorted(VERSOES)
+    for k in quais:
+        v = VERSOES[k]
+        aplicar(v)
+        st = render()
+        # mesma intensidade percebida nas três versões (medida em LUFS; a do trompete soa mais alta)
+        st = st * 10 ** (v.get("ganho_db", 0.0) / 20)
+        st = signal.resample_poly(st, 1, 2, axis=1)  # 22,05 kHz basta para o clima de disco antigo
+        data = (np.clip(st, -1, 1) * 32767).astype("<i2").T.reshape(-1)
+        with wave.open(os.path.join(out, v["arquivo"]), "wb") as w:
+            w.setnchannels(2)
+            w.setsampwidth(2)
+            w.setframerate(SR // 2)
+            w.writeframes(data.tobytes())
+        print("%s: %d compassos, %.1f s a %.0f bpm, pico %.1f dBFS" % (v["arquivo"], BARS, TOTAL, BPM, 20 * np.log10(np.abs(st).max())))
 
 
 if __name__ == "__main__":

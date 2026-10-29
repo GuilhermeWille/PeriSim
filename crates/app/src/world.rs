@@ -50,7 +50,7 @@ fn glow(c: Color) -> M {
     emis(Tex::White, c)
 }
 
-pub fn build(r: &mut Renderer, sim: &Sim, selected: Option<&str>, hover: Option<&str>) -> World {
+pub fn build(r: &mut Renderer, sim: &Sim, selected: Option<&str>, hover: Option<&str>, bench: &crate::bench::Bench) -> World {
     let local = sim.case.setting == Setting::Local;
     let mut w = World {
         picks: vec![],
@@ -61,6 +61,10 @@ pub fn build(r: &mut Renderer, sim: &Sim, selected: Option<&str>, hover: Option<
         start: (vec3(0.0, 0.0, 2.1), std::f32::consts::PI),
         board: None,
     };
+    if assar_vista().is_some() {
+        outside_far(r);
+        return w;
+    }
     room(r, local);
     // pontos de apoio para os itens
     let visible: Vec<&Item> = sim.case.items.iter().filter(|i| !i.hidden || i.flag("descoberto")).collect();
@@ -94,69 +98,79 @@ pub fn build(r: &mut Renderer, sim: &Sim, selected: Option<&str>, hover: Option<
     }
     decor(r, local, &mut w, sim);
     vestigios(r, sim, &mut w, &item_spots, local, selected, hover);
-    // ferramentas do perito (na bancada ou na mesa de apoio)
-    let tools_at = if local { vec3(2.1, 0.72, 0.95) } else { vec3(-0.9, 0.905, 0.0) };
+    // bloqueador de escrita: na bancada de exame (laboratório) ou na mesa da estação portátil (local)
+    let tools_at = if local { vec3(1.92, 0.75, -1.72) } else { vec3(-0.9, 0.905, 0.0) };
     let wb_on = sim.hashes.keys().any(|k| k.starts_with("wb:"));
     tool_writeblocker(r, tools_at, wb_on);
     w.picks.push(Pick { id: "TOOL-WB".into(), center: tools_at + vec3(0.0, 0.04, 0.0), half: vec3(0.12, 0.05, 0.08), label: "Bloqueador de escrita".into() });
     let eq = &sim.equip;
-    // cadeia montada: cabo SATA/adaptador junto ao bloqueador, mídia retirada ao lado, cabo USB para a estação
-    let mut k = 0.0;
-    for (mid, dest) in &eq.linked {
-        let at = tools_at + vec3(-0.12 - k, 0.0, 0.16);
+    // mídias retiradas e cadeia montada, ao lado do bloqueador (cada mídia é um alvo "M:<id>")
+    let media_at = |k: usize| if local { tools_at + vec3(0.0, 0.0, -0.25 - 0.15 * k as f32) } else { tools_at + vec3(0.22 + 0.2 * k as f32, 0.0, -0.12) };
+    let mut k = 0usize;
+    let mut media: Vec<&String> = eq.linked.keys().collect();
+    media.extend(eq.removed.iter().filter(|m| !eq.linked.contains_key(*m)));
+    for mid in media {
+        let at = media_at(k);
         let mk = sim.case.media.iter().find(|m| &m.id == mid).map(|m| m.kind);
         match mk {
-            Some(MediaKind::Hdd) => hdd(r, at + vec3(-0.08, 0.013, 0.0), false),
-            Some(MediaKind::Nvme) => nvme(r, at + vec3(-0.08, 0.002, 0.0)),
-            _ => {
-                r.model("ssd_25", at + vec3(-0.08, 0.0, 0.0), 0.0, &[]);
-            }
-        }
-        let cabo = match mk {
-            Some(MediaKind::Nvme) => "adaptador_m2",
-            Some(MediaKind::Sd) => "leitor_sd",
-            Some(MediaKind::Usb) => "",
-            _ => "cabo_sata",
-        };
-        if !cabo.is_empty() {
-            r.model(cabo, at + vec3(0.02, 0.0, -0.02), 0.4, &[]);
-        }
-        if dest == "estacao" {
-            r.bx(at + vec3(0.0, 0.004, -0.35), vec3(0.006, 0.006, 0.7), plastic(rgb(200, 40, 40)));
-        }
-        k += 0.22;
-    }
-    for mid in eq.removed.iter().filter(|m| !eq.linked.contains_key(*m)) {
-        let at = tools_at + vec3(0.12 + k, 0.0, 0.18);
-        match sim.case.media.iter().find(|m| &m.id == mid).map(|m| m.kind) {
+            Some(MediaKind::Hdd) => hdd(r, at + vec3(0.0, 0.013, 0.0), false),
             Some(MediaKind::Nvme) => nvme(r, at + vec3(0.0, 0.002, 0.0)),
-            Some(MediaKind::Ssd) => {
+            _ => {
                 r.model("ssd_25", at, 0.0, &[]);
             }
-            _ => hdd(r, at + vec3(0.0, 0.013, 0.0), false),
         }
-        k += 0.16;
+        if let Some(dest) = eq.linked.get(mid) {
+            // cabo/adaptador instalado entre a mídia e o bloqueador (ou direto na estação)
+            let cabo = match mk {
+                Some(MediaKind::Nvme) => "adaptador_m2",
+                Some(MediaKind::Sd) => "leitor_sd",
+                Some(MediaKind::Usb) => "",
+                _ => "cabo_sata",
+            };
+            if !cabo.is_empty() {
+                let mid_pt = (at + tools_at) * 0.5;
+                r.model(cabo, mid_pt, 0.4, &[]);
+            }
+            if dest == "estacao" {
+                r.bx(at + vec3(0.0, 0.004, -0.35), vec3(0.006, 0.006, 0.7), plastic(rgb(200, 40, 40)));
+            }
+        }
+        let sel = selected == Some(format!("M:{}", mid).as_str()) || hover == Some(format!("M:{}", mid).as_str());
+        let half = vec3(0.07, 0.03, 0.09);
+        if sel {
+            outline(r, at + vec3(0.0, 0.03, 0.0), half, Color::new(0.6, 0.85, 1.0, 1.0));
+        }
+        w.picks.push(Pick { id: format!("M:{}", mid), center: at + vec3(0.0, 0.03, 0.0), half, label: format!("Mídia {} (retirada)", mid) });
+        k += 1;
     }
     if eq.blocker_host {
-        r.model("cabo_usb", tools_at + vec3(0.14, 0.0, -0.08), 0.0, &[]);
+        r.model("cabo_usb", tools_at + vec3(0.14, 0.0, 0.08), 0.0, &[]);
     }
-    if eq.hand != Some(pericia_core::equip::Tool::Camera) {
-        tool_camera(r, tools_at + vec3(0.35, 0.0, 0.05));
-        w.picks.push(Pick { id: "TOOL-CAM".into(), center: tools_at + vec3(0.35, 0.06, 0.05), half: vec3(0.09, 0.06, 0.06), label: "Câmera fotográfica — clique para pegar".into() });
-    }
-    // maleta pericial (todas as ferramentas, luvas e pulseira)
-    let (maleta_at, maleta_rot) = if local { (vec3(2.82, 0.72, 0.95), -std::f32::consts::FRAC_PI_2) } else { (vec3(2.0, 0.72, 1.0), -std::f32::consts::FRAC_PI_2) };
+    // bancada de ferramentas (a do laboratório fica encostada na parede da frente)
+    let (bc, bl, bd) = crate::bench::bench_geom(local);
     if !local {
-        table(r, vec3(2.0, 0.0, 1.0), vec3(1.0, 0.72, 0.6), metal(rgb(150, 154, 160)), metal(rgb(90, 92, 98)));
-        w.colliders.push(col((1.5, 0.7), (2.5, 1.3)));
+        table(r, vec3(bc.x, 0.0, bc.z), vec3(bl, bc.y, bd), m(Tex::Mat, rgb(120, 200, 180), 0.5, 0.1), metal(rgb(90, 92, 98)));
+        w.colliders.push(col((bc.x - bl / 2.0, bc.z - bd / 2.0), (bc.x + bl / 2.0, bc.z + bd / 2.0)));
     }
-    if !r.model("maleta_pericial", maleta_at, maleta_rot, &[]) {
-        r.bx(maleta_at + vec3(0.0, 0.06, 0.0), vec3(0.4, 0.12, 0.55), plastic(rgb(40, 42, 46)));
+    let hand_id = eq.hand.and_then(|t| pericia_core::equip::TOOLS.iter().find(|x| x.0 == t).map(|x| x.1));
+    for id in crate::bench::items() {
+        if Some(id) == hand_id {
+            continue;
+        }
+        let Some((pos, yaw)) = bench.get(local, id) else { continue };
+        let tf = crate::bench::transform(r, id, pos, yaw);
+        let name = crate::bench::model_of(id);
+        r.model_m(name, tf, &[]);
+        let (lo, hi) = r.model_aabb(name, tf).unwrap_or((pos - Vec3::splat(0.04), pos + Vec3::splat(0.04)));
+        // caixa de seleção com tamanho mínimo: peças minúsculas (ejetor, pendrive) também são miráveis
+        let center = (lo + hi) * 0.5;
+        let half = ((hi - lo) * 0.5).max(vec3(0.03, 0.025, 0.03));
+        let pid = format!("T:{}", id);
+        if hover == Some(pid.as_str()) {
+            outline(r, center, half + Vec3::splat(0.008), Color::new(0.6, 0.85, 1.0, 1.0));
+        }
+        w.picks.push(Pick { id: pid, center, half, label: crate::bench::name_of(id).to_string() });
     }
-    let side = if local { vec3(-0.45, 0.0, -0.18) } else { vec3(-0.42, 0.0, -0.18) };
-    r.model("caixa_luvas", maleta_at + side, 0.3, &[]);
-    r.model("pulseira_esd", maleta_at + side + vec3(0.02, 0.0, 0.3), 0.0, &[]);
-    w.picks.push(Pick { id: "MALETA".into(), center: maleta_at + vec3(0.0, 0.15, 0.0), half: vec3(0.3, 0.2, 0.32), label: "Maleta pericial — ferramentas, luvas e pulseira".into() });
     w
 }
 
@@ -371,7 +385,20 @@ fn out_box(r: &mut Renderer, c: Vec3, size: Vec3, t: Tex, tile: f32, base: [f32;
 
 /// Rua e prédios do outro lado, árvores, horizonte e céu: profundidade real pela janela.
 /// A sala fica no 5º andar (piso externo a −14 m). Tudo emissivo (luz de dia já "assada").
-fn outside(r: &mut Renderer, wall: M) {
+/// Vista da janela: ponto de vista e campo de visão com que a paisagem foi pré-renderizada, e
+/// distância do plano onde a imagem é exibida. Do interior da sala a imagem plana tem a mesma
+/// perspectiva da cena 3D original (exata do ponto de captura, muito próxima de qualquer outro).
+pub const VISTA_EYE: Vec3 = Vec3::new(-2.0, 1.55, 0.75);
+pub const VISTA_FOVY_DEG: f32 = 78.0;
+pub const VISTA_PLANO_X: f32 = -30.0;
+
+/// Modo de pré-renderização da vista (PERICIA_ASSAR_VISTA=<arquivo.png>): só a paisagem.
+pub fn assar_vista() -> Option<String> {
+    std::env::var("PERICIA_ASSAR_VISTA").ok().filter(|v| !v.is_empty())
+}
+
+/// Fachada do nosso prédio, vão e vidro da janela: perto demais para ficar na imagem plana.
+fn outside_near(r: &mut Renderer, wall: M) {
     let gy = -14.0;
     // fachada externa do nosso prédio e o vão da janela com espessura (peitoril, ombreiras, verga)
     let concreto = [0.80, 0.78, 0.74];
@@ -383,6 +410,24 @@ fn outside(r: &mut Renderer, wall: M) {
     out_box(r, vec3(-3.9, 0.87, 0.75), vec3(0.16, 0.04, 1.62), Tex::Ground, 1.0, [0.9, 0.9, 0.88]); // peitoril externo
     // vidro (quase transparente) com reflexo leve
     r.boxr(vec3(-3.56, 1.5, 0.75), vec3(0.008, 1.2, 1.5), 0.0, M { t: Tex::Glass, c: Color::new(0.82, 0.9, 0.98, 0.16), tile: 1.5, spec: 1.0, emis: false });
+}
+
+/// A paisagem como uma imagem num plano distante (uma face em vez de milhares).
+fn outside_flat(r: &mut Renderer) {
+    let aspect = r.tex.get(&Tex::Vista).map(|t| t.width() / t.height().max(1.0)).filter(|a| a.is_finite() && *a > 0.2).unwrap_or(2.0);
+    let l = VISTA_EYE.x - VISTA_PLANO_X;
+    let hh = l * (VISTA_FOVY_DEG.to_radians() / 2.0).tan();
+    let hw = hh * aspect;
+    let (x, y, z) = (VISTA_PLANO_X, VISTA_EYE.y, VISTA_EYE.z);
+    // olhando para −X, a direita da imagem fica em −Z; v = 0 no alto
+    r.quad(Tex::Vista, [vec3(x, y + hh, z + hw), vec3(x, y + hh, z - hw), vec3(x, y - hh, z - hw), vec3(x, y - hh, z + hw)], [vec2(0.0, 0.0), vec2(1.0, 0.0), vec2(1.0, 1.0), vec2(0.0, 1.0)], vec3(1.0, 0.0, 0.0), WHITE, 0.0, true);
+    // borda: céu acima e chão abaixo, para olhares muito inclinados pela janela
+    r.quad(Tex::Sky, [vec3(x, y + hh * 3.0, z + hw * 2.0), vec3(x, y + hh * 3.0, z - hw * 2.0), vec3(x, y + hh - 0.01, z - hw * 2.0), vec3(x, y + hh - 0.01, z + hw * 2.0)], [vec2(0.0, 0.0); 4], vec3(1.0, 0.0, 0.0), Color::new(0.38, 0.58, 0.86, 1.0), 0.0, true);
+}
+
+/// A paisagem 3D completa (usada só para pré-renderizar a imagem da vista).
+fn outside_far(r: &mut Renderer) {
+    let gy = -14.0;
     // chão: grama, calçadas e a rua
     out_box(r, vec3(-150.0, gy - 0.05, 0.0), vec3(300.0, 0.1, 600.0), Tex::Ground, 3.0, [0.36, 0.48, 0.30]);
     out_box(r, vec3(-11.0, gy + 0.06, 0.0), vec3(6.0, 0.12, 300.0), Tex::Ground, 1.0, [0.72, 0.71, 0.68]);
@@ -469,7 +514,8 @@ fn room(r: &mut Renderer, local: bool) {
     r.bx(vec3(-w / 2.0 - 0.05, 0.45, 0.75), vec3(0.1, 0.9, 1.5), wall);
     r.bx(vec3(-w / 2.0 - 0.05, 2.45, 0.75), vec3(0.1, 0.7, 1.5), wall);
     // janela: vidro emissivo (luz do dia), caixilho e peitoril
-    outside(r, wall);
+    outside_near(r, wall);
+    outside_flat(r);
     let frame = metal(rgb(225, 228, 232));
     r.bx(vec3(-w / 2.0 - 0.04, 1.5, 0.75), vec3(0.05, 1.24, 0.05), frame);
     r.bx(vec3(-w / 2.0 - 0.04, 1.5, 0.75), vec3(0.05, 0.05, 1.54), frame);
@@ -551,8 +597,6 @@ pub fn workstation(r: &mut Renderer, c: Vec3, w: &mut World) {
     if !r.model("mouse", vec3(c.x + 0.32, top, c.z + 0.18), 0.0, &[]) {
         r.bx(vec3(c.x + 0.32, top + 0.012, c.z + 0.18), vec3(0.06, 0.024, 0.1), plastic(rgb(36, 36, 40)));
     }
-    // bloqueador de escrita da estação
-    r.bx(vec3(c.x - 0.55, top + 0.03, c.z + 0.05), vec3(0.16, 0.05, 0.1), plastic(rgb(200, 70, 40)));
     chair(r, vec3(c.x, 0.0, c.z + 0.7), 0.0);
     w.colliders.push(col((c.x - 0.78, c.z - 0.4), (c.x + 0.78, c.z + 0.4)));
     w.picks.push(Pick { id: "STATION".into(), center: vec3(c.x, top + 0.36 * 1.15, c.z - 0.18), half: vec3(0.38, 0.24, 0.06), label: "Estação Pericial — clique para sentar e usar".into() });
@@ -685,8 +729,10 @@ fn office(r: &mut Renderer, w: &mut World) {
     w.colliders.push(col((-3.15, 2.05), (-2.65, 2.55)));
     // mesa de apoio do perito com a estação portátil
     workstation(r, vec3(2.45, 0.0, -1.8), w);
-    table(r, vec3(2.55, 0.0, 0.95), vec3(1.2, 0.72, 0.6), metal(rgb(150, 154, 160)), metal(rgb(90, 92, 98)));
-    w.colliders.push(col((1.9, 0.6), (3.2, 1.3)));
+    // mesa de apoio do perito = bancada de ferramentas do local
+    let (bc, bl, bd) = crate::bench::bench_geom(true);
+    table(r, vec3(bc.x, 0.0, bc.z), vec3(bl, bc.y, bd), metal(rgb(150, 154, 160)), metal(rgb(90, 92, 98)));
+    w.colliders.push(col((bc.x - bl / 2.0, bc.z - bd / 2.0), (bc.x + bl / 2.0, bc.z + bd / 2.0)));
 }
 
 // ------------------------------------------------------------------ ferramentas
@@ -704,6 +750,7 @@ fn tool_writeblocker(r: &mut Renderer, at: Vec3, on: bool) {
     r.bx(at + vec3(0.04, 0.071, 0.0), vec3(0.08, 0.002, 0.05), m(Tex::Label, WHITE, 0.08, 0.0));
 }
 
+#[allow(dead_code)]
 fn tool_camera(r: &mut Renderer, at: Vec3) {
     if r.model("camera_foto", at, 0.0, &[]) {
         return;

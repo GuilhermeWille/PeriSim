@@ -123,7 +123,7 @@ pub fn update(app: &mut App) {
         _ => None,
     };
     app.audio.ambient(amb);
-    app.audio.music(if app.settings.music_on { Some("musica_noir") } else { None });
+    app.audio.music_playlist(app.settings.music_on);
     let station = app.screen == Screen::Game && app.area == Area::Station;
     app.audio.layer(if station { Some("ambiente_estacao") } else { None });
     // cliques de botões e abas da interface
@@ -179,7 +179,7 @@ mod t {
             let n = command_sound(c).unwrap();
             assert!(dir.join(format!("{}.wav", n)).is_file(), "falta {}.wav ({})", n, c);
         }
-        let mut extra = vec!["ui_clique", "ui_erro", "tablet_sacar", "tablet_guardar", "tablet_toque", "nota_gravada", "cadeira", "ambiente_laboratorio", "ambiente_escritorio", "ambiente_estacao", "musica_noir", "maleta_abrir", "maleta_fechar"];
+        let mut extra = vec!["ui_clique", "ui_erro", "tablet_sacar", "tablet_guardar", "tablet_toque", "nota_gravada", "cadeira", "ambiente_laboratorio", "ambiente_escritorio", "ambiente_estacao", "musica_noir", "musica_noir_2", "musica_noir_3", "maleta_abrir", "maleta_fechar"];
         extra.extend(["interagir_gabinete", "interagir_notebook", "interagir_celular", "interagir_midia", "interagir_ferramenta"]);
         for n in extra {
             assert!(dir.join(format!("{}.wav", n)).is_file(), "falta {}.wav", n);

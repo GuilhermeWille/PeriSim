@@ -15,7 +15,10 @@ mod tablet;
 mod audio;
 #[cfg(any(target_os = "windows", target_os = "macos"))]
 mod audio_out;
+mod bench;
+mod interact;
 mod config;
+mod steps;
 mod sfx;
 mod video;
 mod maleta;
@@ -101,6 +104,18 @@ pub struct App {
     pub hover_pick: Option<String>,
     /// Trava do mouse suspensa pelo jogador (Esc/Tab) até clicar de novo na cena.
     pub lock_paused: bool,
+    /// Bancada de ferramentas (posições organizadas pelo jogador).
+    pub bench: bench::Bench,
+    /// Vista de exame (zoom girando em volta do objeto).
+    pub exam: Option<interact::Exam>,
+    /// Cabo com uma ponta conectada.
+    pub cabo: Option<interact::Cabo>,
+    /// Objetivo marcado no tablet.
+    pub objetivo: Option<interact::Objetivo>,
+    /// Tecla injetada pelo roteiro de teste/vídeo (E, F ou G), tratada como se fosse apertada.
+    pub fake_key: Option<KeyCode>,
+    /// Quadros na cena no modo de pré-renderização da vista da janela.
+    pub vista_n: u32,
     pub seat: (Vec3, f32),
     pub selected: Option<String>,
     pub hover_label: Option<String>,
@@ -198,6 +213,9 @@ impl App {
         self.term_open = false;
         self.ui.focus = None;
         self.lock_paused = false;
+        self.exam = None;
+        self.cabo = None;
+        self.objetivo = None;
     }
 
     pub fn start_case(&mut self, m: ModuleId, d: u8, seed: u32) {
@@ -614,7 +632,8 @@ fn hardware(app: &mut App, area: Rect) {
 
 fn hardware_inner(app: &mut App, area: Rect, modal: bool) {
     let s = app.ui.scale;
-    let show_panel = app.selected.is_some() || app.show_help_overlay;
+    // na cena 3D não há painel de botões: as etapas são feitas com a ferramenta na mão
+    let show_panel = (app.selected.is_some() && !app.settings.render3d) || app.show_help_overlay;
     let panel_w = if show_panel { 370.0 * s } else { 0.0 };
     let view = rect(area.x, area.y, area.w - panel_w, area.h);
     let typing = modal || matches!(app.ui.focus.as_deref(), Some("term") | Some("pin") | Some("seed") | Some("tnote"));
@@ -645,10 +664,23 @@ fn hardware_inner(app: &mut App, area: Rect, modal: bool) {
     let case_id = sim.case.id.clone();
     let mut r = app.renderer.take().unwrap();
     r.screen_tex = app.de.snapshot.clone();
-    let cam = app.player.camera(view);
-    let mut c = app.player.camera(view);
+    let fov = app.settings.fov_deg.to_radians();
+    let vista_cam = || Camera3D { position: world::VISTA_EYE, target: world::VISTA_EYE - vec3(1.0, 0.0, 0.0), up: vec3(0.0, 1.0, 0.0), fovy: world::VISTA_FOVY_DEG.to_radians(), aspect: Some(view.w / view.h), z_near: 0.05, z_far: 900.0, ..Default::default() };
+    let assar = world::assar_vista();
+    let cam = match (&app.exam, &assar) {
+        (_, Some(_)) => vista_cam(),
+        (Some(ex), _) => interact::exam_camera(ex, view, fov),
+        _ => app.player.camera(view),
+    };
+    let mut c = match (&app.exam, &assar) {
+        (_, Some(_)) => vista_cam(),
+        (Some(ex), _) => interact::exam_camera(ex, view, fov),
+        _ => app.player.camera(view),
+    };
     c.viewport = Some((view.x as i32, (screen_height() - view.y - view.h) as i32, view.w as i32, view.h as i32));
-    let wrld = world::build(&mut r, sim, app.selected.as_deref(), app.hover_pick.as_deref());
+    let local_scene = sim.case.setting == Setting::Local;
+    app.bench.ensure(&r, local_scene);
+    let wrld = world::build(&mut r, sim, app.selected.as_deref(), app.hover_pick.as_deref(), &app.bench);
     let lights = render::Lights {
         cam: cam.position,
         l: wrld.lights,
@@ -663,7 +695,7 @@ fn hardware_inner(app: &mut App, area: Rect, modal: bool) {
         board::draw_3d(app, &mut r, o, rt, dn, sz, nm);
     }
     let photo = app.board.pending_photo.take();
-    if photo.is_none() && !app.tablet.open && app.phone.open.is_none() && !app.maleta.open && !app.board.open && app.settings.held_tablet {
+    if photo.is_none() && app.exam.is_none() && !app.tablet.open && app.phone.open.is_none() && !app.maleta.open && !app.board.open && app.settings.held_tablet {
         let (hand, gl) = app.sim.as_ref().map(|x| (x.equip.hand, x.equip.gloves != pericia_core::equip::Gloves::Nenhuma)).unwrap_or((None, false));
         held_hand(&mut r, &cam, hand, gl);
     }
@@ -676,6 +708,27 @@ fn hardware_inner(app: &mut App, area: Rect, modal: bool) {
     }
     r.shadows = app.settings.shadows;
     r.flush(&lights, &c);
+    if let Some(path) = assar.as_ref() {
+        // pré-renderização da vista: grava a imagem da região da cena depois de estabilizar
+        app.vista_n += 1;
+        if app.vista_n == 12 {
+            let img = get_screen_data();
+            let (sw, sh) = (img.width as usize, img.height as usize);
+            let (x0, y0, w, h) = (view.x.max(0.0) as usize, view.y.max(0.0) as usize, view.w as usize, view.h as usize);
+            let mut out = Vec::with_capacity(w * h * 4);
+            // a tela vem de baixo para cima; export_png grava de baixo para cima: a ordem das
+            // linhas da região é mantida
+            for row in (sh - y0 - h)..(sh - y0) {
+                let i = (row * sw + x0) * 4;
+                out.extend_from_slice(&img.bytes[i..i + w * 4]);
+            }
+            for px in out.chunks_mut(4) {
+                px[3] = 255;
+            }
+            Image { bytes: out, width: w as u16, height: h as u16 }.export_png(path);
+            eprintln!("[vista] gravada em {} ({}x{})", path, w, h);
+        }
+    }
     if let Some(alvo) = photo {
         let hora = app.sim.as_ref().map(|x| pericia_core::util::fmt_dt(x.clock, pericia_core::util::BRT)).unwrap_or_default();
         let legenda = app.sim.as_ref().and_then(|x| x.case.vestigios.iter().find(|v| v.id == alvo).map(|v| format!("{} {}", v.id, v.label)).or_else(|| x.case.item(&alvo).map(|i| format!("{} {}", i.id, i.label)))).unwrap_or(alvo);
@@ -692,7 +745,13 @@ fn hardware_inner(app: &mut App, area: Rect, modal: bool) {
     app.player.sens = app.settings.mouse_sens;
     app.player.invert_y = app.settings.invert_y;
     app.player.fov = app.settings.fov_deg.to_radians();
-    if app.player.update(&wrld, !typing, !modal && view.contains(app.ui.mouse)) {
+    // havia exame no início do quadro: a tecla que o fecha não pode reabri-lo no mesmo quadro
+    let was_exam = app.exam.is_some();
+    if app.exam.is_some() && !modal {
+        // exame: o mouse gira o objeto; o perito não anda
+        app.ui.any_input = true;
+        interact::exam_input(app);
+    } else if app.player.update(&wrld, !typing, !modal && view.contains(app.ui.mouse)) {
         app.ui.any_input = true;
     }
     if let Some(run) = app.player.step.take() {
@@ -700,7 +759,7 @@ fn hardware_inner(app: &mut App, area: Rect, modal: bool) {
     }
     // trava do mouse: mira por ponto no centro; destrava em qualquer ação que precise do cursor
     // (janelas, tablet, celular, maleta, quadro, estação, painel de um objeto selecionado)
-    let needs_cursor = modal || typing || app.selected.is_some() || app.show_help_overlay;
+    let needs_cursor = modal || typing || show_panel;
     if !typing && is_key_pressed(KeyCode::Tab) {
         if app.player.captured {
             app.player.set_captured(false);
@@ -739,7 +798,7 @@ fn hardware_inner(app: &mut App, area: Rect, modal: bool) {
     let aim = if app.player.captured { view.center() } else { app.ui.mouse };
     let (o, d) = world::ray(&cam, view, aim);
     let mut best: Option<(f32, usize)> = None;
-    if view.contains(aim) {
+    if view.contains(aim) && app.exam.is_none() {
         for (i, p) in wrld.picks.iter().enumerate() {
             if let Some(t) = world::ray_aabb(o, d, p.center, p.half) {
                 if best.map(|b| t < b.0).unwrap_or(true) {
@@ -748,7 +807,9 @@ fn hardware_inner(app: &mut App, area: Rect, modal: bool) {
             }
         }
     }
-    const REACH: f32 = 2.6;
+    const REACH: f32 = interact::REACH;
+    let all = app.sim.as_ref().map(interact::all_steps).unwrap_or_default();
+    interact::advance_objective(app, &all);
     app.hover_pick = best.filter(|(t, _)| *t <= REACH).map(|(_, i)| wrld.picks[i].id.clone());
     // rótulos flutuantes dos itens próximos
     for p in &wrld.picks {
@@ -807,7 +868,7 @@ fn hardware_inner(app: &mut App, area: Rect, modal: bool) {
     }
     // mira
     let cc = view.center();
-        if app.player.captured {
+    if app.player.captured && app.exam.is_none() {
         // ponto de mira: pequeno, com contorno escuro para aparecer em parede clara e escura
         let rd = (2.6 * s).max(2.0);
         draw_circle(cc.x, cc.y, rd + 1.4, Color::new(0.0, 0.0, 0.0, 0.55));
@@ -816,7 +877,10 @@ fn hardware_inner(app: &mut App, area: Rect, modal: bool) {
     if let Some((t, i)) = best.filter(|_| !modal) {
         let p = &wrld.picks[i];
         let near = t <= REACH;
-        let txt = if near { format!("[clique ou E]  {}", p.label) } else { format!("{}  — aproxime-se", p.label) };
+        let txt = match app.sim.as_ref() {
+            Some(sm) => interact::hover_text(sm, &all, p, near, app.cabo.as_ref(), app.objetivo.as_ref()),
+            None => p.label.clone(),
+        };
         let tw = app.ui.measure(&txt, 12.5, F::Reg) + 18.0 * s;
         let at = if app.player.captured { vec2(cc.x - tw / 2.0, cc.y + 22.0 * s) } else { vec2(aim.x + 16.0 * s, aim.y + 10.0 * s) };
         let rr = rect(at.x, at.y, tw, 24.0 * s);
@@ -836,14 +900,25 @@ fn hardware_inner(app: &mut App, area: Rect, modal: bool) {
         app.ui.focus = None;
         app.lock_paused = false;
     }
-    let pressed_e = !typing && is_key_pressed(KeyCode::E);
-    if !typing && !modal && is_key_pressed(KeyCode::G) && app.sim.as_ref().map(|x| x.strict && x.equip.hand.is_some()).unwrap_or(false) {
-        let out = app.run("guardar");
-        app.toast(out.lines().next().unwrap_or(""));
+    let fk = app.fake_key.take();
+    let key = |k: KeyCode| is_key_pressed(k) || fk == Some(k);
+    let pressed_e = !typing && !modal && !was_exam && key(KeyCode::E);
+    let aimed = best.filter(|(t, _)| *t <= REACH).map(|(_, i)| wrld.picks[i].clone());
+    // G: largar a ferramenta da mão onde se mira (organizar a bancada)
+    if !typing && !modal && !was_exam && key(KeyCode::G) {
+        let yaw = app.player.yaw;
+        interact::put_down(app, o, d, yaw);
     }
-    if clicked || pressed_e {
-        match best.filter(|(t, _)| *t <= REACH).map(|(_, i)| wrld.picks[i].clone()) {
-            Some(p) if p.id == "STATION" => {
+    // F: examinar (zoom girando em volta do objeto)
+    if !typing && !modal && !was_exam && key(KeyCode::F) {
+        if let Some(p) = aimed.as_ref().filter(|p| !p.id.starts_with("T:") && p.id != "QUADRO" && p.id != "STATION") {
+            interact::start_exam(app, &p.id, p.center, p.half, cam.position);
+        }
+    }
+    if (clicked || pressed_e) && !was_exam {
+        let hand_empty = app.sim.as_ref().map(|x| x.equip.hand.is_none()).unwrap_or(true);
+        match aimed.clone() {
+            Some(p) if p.id == "STATION" && hand_empty && app.cabo.is_none() => {
                 app.audio.play("cadeira", audio::Cat::Efeitos, 0.9);
                 app.player.set_captured(false);
                 app.area = Area::Station;
@@ -853,47 +928,35 @@ fn hardware_inner(app: &mut App, area: Rect, modal: bool) {
             Some(p) if p.id == "QUADRO" => {
                 board::open(app);
             }
-            Some(p) if p.id == "MALETA" || p.id == "TOOL-BAG" => {
-                maleta::open(app);
-            }
-            Some(p) if p.id == "TOOL-CAM" && app.sim.as_ref().map(|x| x.strict).unwrap_or(false) => {
-                let out = app.run("pegar camera");
-                app.toast(out.lines().next().unwrap_or(""));
-            }
-            Some(p) if p.id.starts_with("V-") => {
-                app.selected = Some(p.id.clone());
-                app.panel_scroll = 0.0;
-                if app.player.captured {
-                    app.player.set_captured(false);
-                }
-            }
-            Some(p) if p.id.starts_with("ITEM") => {
-                sfx::interact(app, &p.id, p.center);
-                app.selected = Some(p.id.clone());
-                app.panel_scroll = 0.0;
-                if app.player.captured {
-                    app.player.set_captured(false);
-                }
+            Some(p) if p.id.starts_with("T:") => {
+                let id = p.id[2..].to_string();
+                interact::bench_use(app, &id);
             }
             Some(p) => {
-                let info = match p.id.as_str() {
-                    "TOOL-WB" => "Bloqueador de escrita: impede que a leitura altere a mídia original (POP 5.01). Use 'Bloqueador → M-xx' no painel do item.",
-                    "TOOL-CAM" => "Câmera: fixação fotográfica antes de qualquer intervenção ('Fotografar').",
-                    _ => "Embalagens antiestáticas, Faraday bag, papel-alumínio e fita de lacre numerada.",
-                };
                 sfx::interact(app, &p.id, p.center);
-                app.toast(info);
+                let hit = (o + d * best.map(|b| b.0).unwrap_or(1.0)).max(p.center - p.half).min(p.center + p.half);
+                if !interact::use_on(app, &p.id, hit) && p.id != "STATION" {
+                    // mãos livres e nada a fazer sem ferramenta: examinar
+                    interact::start_exam(app, &p.id, p.center, p.half, cam.position);
+                }
             }
             None if clicked && !app.player.captured => {
-                // clicar na cena fecha o painel do objeto e trava a mira de novo
                 app.selected = None;
                 app.lock_paused = false;
             }
             None => {}
         }
     }
-    // dica discreta (controles completos: tablet → Apoio → Controles)
     if !modal {
+        if app.exam.is_some() {
+            interact::draw_exam(app, view);
+        } else {
+            interact::indicators(app, &cam, view, &wrld.picks, &all);
+            interact::objective_hud(app, view, &all);
+        }
+    }
+    // dica discreta (controles completos: tablet → Apoio → Controles)
+    if !modal && app.exam.is_none() {
         hud(app, view);
     }
     if show_panel {
@@ -953,7 +1016,7 @@ fn hud(app: &mut App, view: Rect) {
 fn hint_chips(app: &mut App, view: Rect) {
     let s = app.ui.scale;
     let look = if app.player.captured { ("Esc", "soltar o mouse") } else if app.settings.mouse_lock { ("Clique", "travar a mira") } else { ("Btn. dir.", "olhar") };
-    let chips = [("E", "Interagir / maleta"), look];
+    let chips = [("E", "usar / pegar"), ("F", "examinar"), ("G", "largar"), look];
     let mut x = view.x + 12.0 * s;
     let y = view.y + view.h - 30.0 * s;
     for (k, (key, what)) in chips.iter().enumerate() {
@@ -1014,9 +1077,15 @@ fn held_hand(r: &mut render::Renderer, cam: &Camera3D, tool: Option<Tool>, glove
         2 => -0.1,      // câmera erguida
         _ => -0.3,      // objeto plano voltado para o perito
     };
-    let pos = cam.position + f * 0.36 - up * 0.17 + rt * 0.17;
+    // A manga sai a 90° da pega: se a mão inteira inclinasse junto com a ferramenta, o braço
+    // subiria para o canto superior (como se viesse do pescoço). A mão fica sempre inclinada
+    // para trás e para baixo (braço entrando pelo canto inferior direito) e só a ferramenta
+    // gira dentro do punho até a inclinação desejada.
+    const HAND_TILT: f32 = 0.55;
+    let pos = cam.position + f * 0.37 - up * 0.15 + rt * 0.17;
     let basis = Mat4::from_cols(rt.extend(0.0), up.extend(0.0), (-f).extend(0.0), pos.extend(1.0));
-    let hand = basis * Mat4::from_rotation_y(0.3) * Mat4::from_rotation_x(tilt);
+    let hand = basis * Mat4::from_rotation_y(0.38) * Mat4::from_rotation_x(HAND_TILT);
+    let in_fist = Mat4::from_rotation_x(tilt - HAND_TILT);
     let pele = if gloves { render::m(render::Tex::Plastic, render::rgb(70, 110, 205), 0.3, 0.45) } else { render::m(render::Tex::White, render::rgb(205, 152, 118), 1.0, 0.25) };
     r.model_held("maos", hand, &[("pele", pele), ("pele_unha", pele)]);
     let half = r.model_half(name).unwrap_or(vec3(0.05, 0.02, 0.05));
@@ -1030,7 +1099,7 @@ fn held_hand(r: &mut render::Renderer, cam: &Camera3D, tool: Option<Tool>, glove
         // plano: fica de pé voltado ao perito; a mão segura a borda direita
         _ => Mat4::from_translation(vec3(-half.x * sc + 0.012, 0.0, 0.0)) * Mat4::from_rotation_x(std::f32::consts::FRAC_PI_2),
     } * Mat4::from_scale(Vec3::splat(sc));
-    r.model_held(name, hand * local, &[]);
+    r.model_held(name, hand * in_fist * local, &[]);
 }
 
 /// Painel compacto de ações do objeto selecionado (o estado detalhado está no tablet).
@@ -1719,6 +1788,25 @@ fn run_script(app: &mut App, sc: &mut Script) -> bool {
                 config::open(app);
             }
         },
+        "aim" => {
+            // vira a câmera para o centro de um alvo da cena ("aim T:camera", "aim ITEM-01")
+            let id = if arg.starts_with("T:") || arg.starts_with("M:") { arg.clone() } else { arg.to_uppercase() };
+            if let Some(c) = app.item_pos.get(&id).copied() {
+                let eye = app.player.eye();
+                let d = (c - eye).normalize_or_zero();
+                app.player.yaw = d.x.atan2(d.z);
+                app.player.pitch = d.y.asin();
+            }
+        }
+        "key" => {
+            app.fake_key = match arg.as_str() {
+                "e" => Some(KeyCode::E),
+                "f" => Some(KeyCode::F),
+                "g" => Some(KeyCode::G),
+                "esc" => Some(KeyCode::Escape),
+                _ => None,
+            };
+        }
         "press" => {
             // simula uma interação: "press <id do pick>" (item ou ferramenta) — som de tocar o objeto
             let id = arg.to_uppercase();
@@ -1766,6 +1854,12 @@ async fn main() {
         renderer: None,
         hover_pick: None,
         lock_paused: false,
+        bench: bench::Bench::default(),
+        exam: None,
+        cabo: None,
+        objetivo: None,
+        fake_key: None,
+        vista_n: 0,
         seat: (vec3(0.0, 0.0, 0.0), std::f32::consts::PI),
         selected: None,
         hover_label: None,

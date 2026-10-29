@@ -49,6 +49,8 @@ pub enum Tex {
     Facade,
     Ground,
     CorkPlain,
+    /// Vista da janela pré-renderizada (imagem plana, sem luz nem névoa).
+    Vista,
 }
 
 impl Tex {
@@ -88,6 +90,7 @@ impl Tex {
             Tex::Document => "documento",
             Tex::Blood => "mancha",
             Tex::Sky => "ceu",
+            Tex::Vista => "vista_janela",
             Tex::Facade => "fachada",
             Tex::Ground => "chao_externo",
             Tex::CorkPlain => "cortica_lisa",
@@ -95,14 +98,14 @@ impl Tex {
     }
     /// Imagem aplicada com UV 0..1 (quadros, cartazes, mostradores): não repete.
     pub fn is_image(self) -> bool {
-        matches!(self, Tex::Cork | Tex::CorkPlain | Tex::Whiteboard | Tex::PosterPop | Tex::PosterEpi | Tex::Painting | Tex::Calendar | Tex::SignLab | Tex::ClockFace | Tex::Document | Tex::Blood)
+        matches!(self, Tex::Cork | Tex::CorkPlain | Tex::Whiteboard | Tex::PosterPop | Tex::PosterEpi | Tex::Painting | Tex::Calendar | Tex::SignLab | Tex::ClockFace | Tex::Document | Tex::Blood | Tex::Vista)
     }
 }
 
-pub const ALL_TEX: [Tex; 35] = [
+pub const ALL_TEX: [Tex; 36] = [
     Tex::White, Tex::Wood, Tex::WoodFloor, Tex::Vinyl, Tex::Wall, Tex::Ceiling, Tex::Metal, Tex::Plastic, Tex::Fabric, Tex::Mat, Tex::Vent, Tex::Keyboard, Tex::Label, Tex::Rug,
     Tex::Leaf, Tex::Cardboard, Tex::Screen, Tex::Concrete, Tex::Glass, Tex::Blob, Tex::Outside, Tex::Cork, Tex::Whiteboard, Tex::PosterPop, Tex::PosterEpi,
-    Tex::Painting, Tex::Calendar, Tex::SignLab, Tex::ClockFace, Tex::Document, Tex::Blood, Tex::Sky, Tex::Facade, Tex::Ground, Tex::CorkPlain,
+    Tex::Painting, Tex::Calendar, Tex::SignLab, Tex::ClockFace, Tex::Document, Tex::Blood, Tex::Sky, Tex::Facade, Tex::Ground, Tex::CorkPlain, Tex::Vista,
 ];
 
 fn hash(x: i32, y: i32, s: u32) -> f32 {
@@ -278,7 +281,7 @@ pub fn gen(t: Tex) -> Vec<u8> {
                 Tex::Calendar | Tex::ClockFace => [0.98, 0.98, 0.97],
                 Tex::SignLab => [0.09, 0.2, 0.38],
                 Tex::Blood => [0.30, 0.06, 0.05],
-                Tex::Sky => {
+                Tex::Sky | Tex::Vista => {
                     // céu: v = 0 no alto; nuvens esparsas, horizonte mais claro
                     let h = 1.0 - v;
                     let sky = mix([0.80, 0.86, 0.92], [0.38, 0.58, 0.86], h.powf(0.7));
@@ -684,7 +687,7 @@ impl Renderer {
             gl_use_material(self.depth_mat.as_ref().unwrap());
             for &i in &order {
                 let (t, v, idx) = &batches[i];
-                if idx.is_empty() || matches!(t, Tex::Blob | Tex::Glass | Tex::Outside | Tex::Wall | Tex::Ceiling | Tex::Sky | Tex::Facade | Tex::Ground) || v.iter().any(|x| x.color[3] < 255) {
+                if idx.is_empty() || matches!(t, Tex::Blob | Tex::Glass | Tex::Outside | Tex::Wall | Tex::Ceiling | Tex::Sky | Tex::Facade | Tex::Ground | Tex::Vista) || v.iter().any(|x| x.color[3] < 255) {
                     continue;
                 }
                 draw_mesh(&Mesh { vertices: v.clone(), indices: idx.clone(), texture: None });
@@ -833,6 +836,51 @@ impl Renderer {
         }
         self.models.insert(name.to_string(), model);
         true
+    }
+
+    /// Modelo com transformação completa (`m`: local → mundo) nos lotes da cena (com sombra):
+    /// ferramentas deitadas na bancada, objetos largados pelo perito.
+    pub fn model_m(&mut self, name: &str, m: Mat4, over: &[(&str, M)]) -> bool {
+        let Some(model) = self.models.remove(name) else { return false };
+        let nm = Mat3::from_mat4(m).inverse().transpose();
+        for part in &model.parts {
+            let mt = over.iter().find(|(k, _)| *k == part.material).map(|(_, x)| *x).unwrap_or(part.mt);
+            let k = 1.0 / mt.tile.max(0.001);
+            let w = if mt.emis { 2.0 } else { mt.spec };
+            let raw_uv = mt.tile >= 0.999 && (mt.emis || mt.t == Tex::Screen || mt.t == Tex::Desktop || mt.t.is_image());
+            for (verts, idx) in &part.chunks {
+                let i = self.batch_room(mt.t, verts.len(), idx.len());
+                let b = &mut self.batches[i];
+                let base = b.1.len() as u16;
+                for &(p, n, uv) in verts {
+                    let wp = m.transform_point3(p);
+                    let ao = if mt.emis { 1.0 } else { (0.62 + wp.y * 0.9).min(1.0) };
+                    let col = [(mt.c.r * ao * 255.0) as u8, (mt.c.g * ao * 255.0) as u8, (mt.c.b * ao * 255.0) as u8, (mt.c.a * 255.0) as u8];
+                    let uv = if mt.t.is_image() { vec2(uv.x, 1.0 - uv.y) } else if raw_uv { uv } else { uv * k };
+                    b.1.push(Vertex { position: wp, uv, color: col, normal: (nm * n).normalize_or_zero().extend(w) });
+                }
+                b.2.extend(idx.iter().map(|&x| base + x));
+            }
+        }
+        self.models.insert(name.to_string(), model);
+        true
+    }
+
+    /// Caixa (mín, máx) do modelo depois da transformação `m` — para apoiar objetos girados
+    /// exatamente sobre uma superfície e montar a caixa de seleção.
+    pub fn model_aabb(&self, name: &str, m: Mat4) -> Option<(Vec3, Vec3)> {
+        let model = self.models.get(name)?;
+        let (mut lo, mut hi) = (Vec3::splat(f32::MAX), Vec3::splat(f32::MIN));
+        for part in &model.parts {
+            for (verts, _) in &part.chunks {
+                for &(p, _, _) in verts {
+                    let q = m.transform_point3(p);
+                    lo = lo.min(q);
+                    hi = hi.max(q);
+                }
+            }
+        }
+        (lo.x <= hi.x).then_some((lo, hi))
     }
 
     /// Desenha um modelo com transformação completa (`m`: local → mundo) como objeto em mãos:

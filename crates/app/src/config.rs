@@ -137,10 +137,11 @@ pub fn draw(app: &mut App) {
                 ("Mouse", "olhar (travado no centro; o ponto é a mira)"),
                 ("Esc / Tab", "soltar o mouse · clique na cena trava de novo"),
                 ("+ / −", "sensibilidade da câmera"),
-                ("Clique ou E", "interagir com o objeto na mira / abrir a maleta"),
+                ("E ou clique", "pegar da bancada / usar a ferramenta da mão no objeto"),
+                ("F", "examinar o objeto de perto"),
                 ("T", "tirar ou guardar o tablet"),
                 ("F2 ou '", "abrir / fechar o terminal do simulador (Esc fecha)"),
-                ("G", "devolver à maleta a ferramenta da mão"),
+                ("G", "largar a ferramenta onde você mirar"),
                 ("Esc", "fechar janelas; com o mouse solto, abrir estas configurações"),
                 ("Page Up / Page Down", "olhar para cima / para baixo pelo teclado"),
             ] {

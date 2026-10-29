@@ -126,3 +126,22 @@ Jazz noir original de 126 s em ré menor, 76 bpm, em loop sem emenda (estéreo, 
 | Vista da janela em 3D (5º andar: rua, calçadas, árvores, carros, prédios e horizonte com névoa) | texturas procedurais `Sky`, `Facade`, `Ground` (substituíveis por `ceu.png`, `fachada.png`, `chao_externo.png`) |
 
 As fotos tiradas no jogo ficam em `saves/fotos/<caso>/foto_NN.png` (400×300) e o quadro em `saves/quadro.json`.
+
+## Novidades da v0.10
+
+| Recurso | Arquivos |
+|---|---|
+| Vista da janela plana (uma imagem num plano a 32 m, com a mesma perspectiva da paisagem 3D) | `textures/vista_janela.png` |
+| Trilha em três versões do mesmo tema, tocadas em ordem aleatória sem repetir a mesma em seguida | `sounds/musica_noir.wav` (76 bpm, sax), `sounds/musica_noir_2.wav` (62 bpm, trompete com surdina), `sounds/musica_noir_3.wav` (96 bpm, vibrafone e chuva) |
+| Bancada de ferramentas (sem maleta) | modelos das ferramentas; arrumação do jogador em `saves/bancada.json` |
+
+Para refazer a vista da janela depois de mudar a paisagem em `world.rs` (`outside_far`):
+
+```bash
+Xvfb :87 -screen 0 2048x1100x24 &
+printf 'new C501-D2-00000007\nterm off\nwait 40\n' > /tmp/vista.txt
+DISPLAY=:87 PERICIA_WINDOW=2048x1100 PERICIA_AUDIO=off PERICIA_ASSAR_VISTA=assets/textures/vista_janela.png \
+  PERICIA_SCRIPT=/tmp/vista.txt ./target/release/pericia-sim
+```
+
+As versões da música: `python3 tools/audio/gerar_musica.py assets 2 3` (sem números, gera as três; todas ficam a −17,4 LUFS).

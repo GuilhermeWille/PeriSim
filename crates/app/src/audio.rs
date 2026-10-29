@@ -18,6 +18,8 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
 
 pub const RATE: u32 = 44100;
+/// Versões do tema musical (tools/audio/gerar_musica.py), tocadas em ordem aleatória.
+pub const TRILHA: [&str; 3] = ["musica_noir", "musica_noir_2", "musica_noir_3"];
 const CHUNK: usize = 1024;
 const MAX_VOICES: usize = 40;
 
@@ -376,6 +378,49 @@ impl Audio {
         }
     }
 
+    /// Trilha em playlist: cada faixa toca uma vez e, perto do fim, entra outra sorteada —
+    /// nunca a mesma em seguida — com fusão de 3 s. Só entram as faixas presentes em
+    /// assets/sounds. `on = false` desvanece a música.
+    pub fn music_playlist(&mut self, on: bool) {
+        if !on {
+            self.music(None);
+            return;
+        }
+        let disp: Vec<&str> = TRILHA.iter().copied().filter(|n| self.clips.contains_key(*n)).collect();
+        if disp.is_empty() {
+            return;
+        }
+        let restante = self.music.as_ref().and_then(|(_, id)| self.remaining(*id));
+        if matches!(restante, Some(r) if r > 3.0) {
+            return;
+        }
+        let atual = self.music.as_ref().map(|m| m.0.clone());
+        let r = self.rand();
+        let nome = proxima_faixa(&disp, atual.as_deref(), r).to_string();
+        if let Some((_, id)) = self.music.take() {
+            self.fade_out(id, 3.0);
+        }
+        let fade = if atual.is_some() { 3.0 } else { 2.5 };
+        if let Some(id) = self.push(&nome, Cat::Musica, 1.0, 1.0, 1.0, false, fade) {
+            eprintln!("[música] {}", nome);
+            self.music = Some((nome, id));
+        }
+    }
+
+    /// Faixa da trilha tocando agora (para o menu e os testes).
+    pub fn music_now(&self) -> Option<&str> {
+        self.music.as_ref().map(|m| m.0.as_str())
+    }
+
+    /// Segundos que faltam para a voz terminar (None = já terminou).
+    fn remaining(&self, id: u64) -> Option<f64> {
+        let m = self.mix.lock().unwrap();
+        m.voices.iter().find(|v| v.id == id).map(|v| {
+            let frames = (v.clip.data.len() / v.clip.ch.max(1)) as f64;
+            ((frames - v.pos).max(0.0) / v.rate.max(1e-6)) / RATE as f64
+        })
+    }
+
     /// Segunda camada de ambiente (ex.: ventoinha da estação quando sentado nela).
     pub fn layer(&mut self, name: Option<&str>) {
         if self.layer.as_ref().map(|a| a.0.as_str()) == name {
@@ -498,6 +543,13 @@ impl Audio {
     }
 }
 
+/// Sorteio da próxima faixa da trilha: qualquer uma, menos a que acabou de tocar (com uma
+/// faixa só, ela repete). `r` em [0, 1).
+pub fn proxima_faixa<'a>(disp: &[&'a str], atual: Option<&str>, r: f32) -> &'a str {
+    let opcoes: Vec<&'a str> = disp.iter().copied().filter(|n| disp.len() == 1 || atual != Some(*n)).collect();
+    opcoes[((r * opcoes.len() as f32) as usize).min(opcoes.len() - 1)]
+}
+
 /// Ganho esquerdo/direito de uma fonte em `src` para um ouvinte em `ear` olhando com `right` à direita.
 pub fn spatial(src: Vec3, ear: Vec3, right: Vec3) -> (f32, f32) {
     let d = src - ear;
@@ -602,6 +654,39 @@ mod t {
 
     fn clip(v: Vec<f32>, ch: usize) -> Arc<Clip> {
         Arc::new(Clip { data: v, ch, rate: RATE })
+    }
+
+    #[test]
+    fn trilha_aleatoria_sem_repetir_a_mesma() {
+        let disp = ["musica_noir", "musica_noir_2", "musica_noir_3"];
+        let mut seed = 0x1234_5678u32;
+        let mut atual: Option<&str> = None;
+        let mut vistas = std::collections::HashSet::new();
+        for _ in 0..300 {
+            seed ^= seed << 13;
+            seed ^= seed >> 17;
+            seed ^= seed << 5;
+            let r = (seed % 10_000) as f32 / 10_000.0;
+            let n = proxima_faixa(&disp, atual, r);
+            assert_ne!(Some(n), atual, "repetiu a mesma faixa em seguida");
+            vistas.insert(n);
+            atual = Some(n);
+        }
+        assert_eq!(vistas.len(), 3, "todas as versões tocam");
+        assert_eq!(proxima_faixa(&["musica_noir"], Some("musica_noir"), 0.5), "musica_noir");
+    }
+
+    #[test]
+    fn tempo_restante_da_faixa() {
+        let mix = Arc::new(Mutex::new(Mix::new()));
+        // 10 s de estéreo a 22,05 kHz, tocado na taxa certa, já em 4 s
+        let c = Arc::new(Clip { data: vec![0.0; 22050 * 2 * 10], ch: 2, rate: 22050 });
+        let rate = 22050.0 / RATE as f64;
+        mix.lock().unwrap().voices.push(Voice { clip: c, pos: 22050.0 * 4.0, rate, gl: 1.0, gr: 1.0, cat: Cat::Musica, looping: false, id: 7, fade: 1.0, fade_to: 1.0, fade_step: 1.0 });
+        let a = Audio { mix, clips: HashMap::new(), status: Arc::new(Mutex::new(String::new())), ok: Arc::new(AtomicBool::new(false)), next: 8, ambient: None, layer: None, music: Some(("musica_noir".into(), 7)), seed: 1, rec: None, offline: None, last: HashMap::new(), log: vec![] };
+        let r = a.remaining(7).unwrap();
+        assert!((r - 6.0).abs() < 0.01, "{}", r);
+        assert!(a.remaining(99).is_none());
     }
 
     #[test]

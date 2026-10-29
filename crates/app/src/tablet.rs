@@ -324,14 +324,16 @@ fn local_blocks(sim: &Sim) -> Vec<B> {
 
 const CONTROLES: &str = "\
 Deslocamento: W A S D (Shift corre) · olhar: mouse travado no centro (o ponto é a mira); Esc ou Tab soltam, clique na cena trava de novo; + / − ajustam a sensibilidade
-O mouse fica livre sozinho no tablet, na maleta, no quadro, no celular, na estação e no painel de um objeto
-Interagir com o objeto na mira: clique ou E — abre o painel de etapas do objeto
-Maleta pericial: aproxime-se e use E — pegar ferramenta, calçar/trocar luvas, pulseira antiestática
-Uma ferramenta por vez na mão; G devolve a ferramenta à maleta. Botões com ícone pedem a ferramenta certa
-Tablet: T abre e fecha (Esc também fecha); nada muda no caso ao abrir ou fechar
-Estação pericial: aproxime-se do computador da bancada e interaja
+Bancada de ferramentas: mire uma ferramenta e aperte E para pegar; G larga a da mão onde você mirar (bancada ou mesa) — a arrumação fica salva
+Usar: com a ferramenta certa na mão, mire o objeto e aperte E — o jogo faz a próxima etapa da lista daquela ferramenta; fora de ordem, ele diz o que falta
+Indicadores: com uma ferramenta na mão, um losango amarelo marca cada lugar onde ela serve agora
+Cabos: E numa ponta (ex.: a mídia) e depois E na outra (ex.: o bloqueador); a ponta que falta fica marcada em verde
+Examinar: F mostra o objeto de perto (o mouse gira, a roda aproxima) com o que está escrito nele; com as mãos livres, E também examina
+Objetivo: no tablet → Objeto, clique numa etapa para marcá-la; ela aparece no canto da tela e avança sozinha
+Tablet: T abre e fecha (Esc também fecha); o mouse fica livre no tablet, no quadro, no celular e na estação
+Estação pericial: com as mãos livres, aproxime-se do monitor e aperte E
 Terminal (oculto por padrão): F2, ' ou o botão Terminal na barra superior; Esc ou ✕ fecham; 'ajuda' lista os comandos
-Configurações (som, gráficos, controles, interface): botão ⚙ na barra superior ou Esc no ambiente";
+Configurações (som, gráficos, controles, interface): botão ⚙ na barra superior ou Esc com o mouse solto";
 
 fn apoio_blocks(sim: &Sim, sub: u8) -> Vec<B> {
     let mut v = vec![];
@@ -507,6 +509,7 @@ fn draw_objeto(app: &mut App, r: Rect) {
     let sim = app.sim.as_ref().unwrap();
     let mut itens = vec![(LOCAL.to_string(), "Local de exame".to_string())];
     itens.extend(tb::itens_visiveis(sim));
+    itens.extend(sim.case.vestigios.iter().map(|v| (v.id.clone(), v.label.clone())));
     if app.tablet.item.as_ref().map(|i| !itens.iter().any(|(x, _)| x == i)).unwrap_or(true) {
         app.tablet.item = itens.first().map(|x| x.0.clone());
     }
@@ -532,25 +535,72 @@ fn draw_objeto(app: &mut App, r: Rect) {
         app.ui.text("Nenhum objeto disponível.", dr.x + 12.0 * s, dr.y + 24.0 * s, 12.0, F::Reg, T.dim);
         return;
     };
-    let b = if id == LOCAL { local_blocks(app.sim.as_ref().unwrap()) } else { objeto_blocks(app.sim.as_ref().unwrap(), &id) };
-    let bar = 40.0 * s;
-    let tr = rect(dr.x, dr.y, dr.w, dr.h - bar);
-    app.ui.frame(tr, T.term_bg, T.border);
-    let mut sc = app.tablet.scroll;
-    rich(&mut app.ui, tr, &b, &mut sc);
-    app.tablet.scroll = sc;
-    let br = rect(dr.x, dr.y + dr.h - bar + 6.0 * s, 260.0 * s, bar - 6.0 * s);
-    if app.ui.button_c(br, "Selecionar e abrir ações  ▸", T.accent2, true) {
-        if id == LOCAL {
-            app.selected = None;
-            app.show_help_overlay = true;
-        } else {
-            app.selected = Some(id);
-        }
-        app.panel_scroll = 0.0;
-        close(app);
+    let sim = app.sim.as_ref().unwrap();
+    let b = if id == LOCAL { local_blocks(sim) } else if sim.case.vestigios.iter().any(|v| v.id == id) { vec![] } else { objeto_blocks(sim, &id) };
+    let etapas = if id == LOCAL { vec![] } else { crate::steps::steps_of(sim, &id) };
+    // ficha em cima (só leitura); etapas embaixo, com o marcador de objetivo
+    let fh = if etapas.is_empty() { dr.h } else if b.is_empty() { 0.0 } else { (dr.h * 0.46).max(120.0 * s) };
+    if fh > 0.0 {
+        let tr = rect(dr.x, dr.y, dr.w, fh);
+        app.ui.frame(tr, T.term_bg, T.border);
+        let mut sc = app.tablet.scroll;
+        rich(&mut app.ui, tr, &b, &mut sc);
+        app.tablet.scroll = sc;
     }
-    app.ui.text("A ficha é só leitura: as ações ficam no painel do objeto.", br.x + br.w + 12.0 * s, br.y + 21.0 * s, 10.5, F::Reg, T.dim);
+    if etapas.is_empty() {
+        return;
+    }
+    let er = rect(dr.x, dr.y + fh + if fh > 0.0 { 8.0 * s } else { 0.0 }, dr.w, dr.h - fh - if fh > 0.0 { 8.0 * s } else { 0.0 });
+    app.ui.frame(er, T.term_bg, T.border);
+    app.ui.text("ETAPAS — na ordem. Clique numa etapa para marcá-la como objetivo (aparece na tela).", er.x + 10.0 * s, er.y + 16.0 * s, 10.5, F::Bold, T.dim);
+    let nx = crate::steps::next_required(&etapas).map(|x| x.cmd.clone());
+    let row = 24.0 * s;
+    let mut y = er.y + 26.0 * s;
+    let marcado = app.objetivo.as_ref().filter(|o| o.owner == id).map(|o| o.cmd.clone());
+    let mut clique: Option<crate::steps::Step> = None;
+    // a lista começa perto da próxima etapa; as já concluídas antes dela viram uma linha-resumo
+    let capacidade = ((er.y + er.h - 4.0 * s - y) / row).floor().max(1.0) as usize;
+    let alvo = etapas.iter().position(|x| !x.done).unwrap_or(etapas.len().saturating_sub(1));
+    let inicio = alvo.saturating_sub(2).min(etapas.len().saturating_sub(capacidade.saturating_sub(1)).max(0));
+    if inicio > 0 {
+        app.ui.text(&format!("✔ {} etapa(s) anteriores concluída(s)", inicio), er.x + 12.0 * s, y + 16.0 * s, 11.5, F::Reg, T.ok);
+        y += row;
+    }
+    for st in etapas.iter().skip(inicio) {
+        if y + row > er.y + er.h - 4.0 * s {
+            app.ui.text("…", er.x + 12.0 * s, y + 12.0 * s, 12.0, F::Reg, T.dim);
+            break;
+        }
+        let rr = rect(er.x + 6.0 * s, y, er.w - 12.0 * s, row - 2.0 * s);
+        let is_mark = marcado.as_deref() == Some(st.cmd.as_str());
+        let hov = app.ui.hover(rr) && !st.done;
+        let is_next = nx.as_deref() == Some(st.cmd.as_str());
+        if is_mark || hov || is_next {
+            let c = if is_mark { Color::new(0.14, 0.26, 0.42, 1.0) } else if hov { Color::new(0.14, 0.15, 0.18, 1.0) } else { Color::new(0.11, 0.12, 0.10, 1.0) };
+            draw_rectangle(rr.x, rr.y, rr.w, rr.h, c);
+        }
+        let (ic, col) = if st.done { ("✔", T.ok) } else if is_mark { ("◆", Color::new(0.55, 0.8, 1.0, 1.0)) } else if is_next { ("▸", T.highlight) } else { ("○", T.dim) };
+        app.ui.text(ic, rr.x + 6.0 * s, rr.y + 16.0 * s, 12.0, F::Bold, col);
+        let tool = st.tool.map(pericia_core::equip::tool_name).unwrap_or("mãos");
+        let opc = if st.optional { "  (opcional)" } else { "" };
+        let label = clip_text(&app.ui, &format!("{}{}", st.label, opc), 12.0, F::Reg, rr.w * 0.62);
+        app.ui.text(&label, rr.x + 26.0 * s, rr.y + 16.0 * s, 12.0, F::Reg, if st.done { T.dim } else { T.text });
+        let tl = clip_text(&app.ui, tool, 11.0, F::Reg, rr.w * 0.3);
+        let tw = app.ui.measure(&tl, 11.0, F::Reg);
+        app.ui.text(&tl, rr.x + rr.w - tw - 8.0 * s, rr.y + 16.0 * s, 11.0, F::Reg, T.dim);
+        if !st.done && app.ui.click_in(rr) {
+            clique = Some(st.clone());
+        }
+        y += row;
+    }
+    if let Some(st) = clique {
+        if marcado.as_deref() == Some(st.cmd.as_str()) {
+            app.objetivo = None;
+        } else {
+            app.objetivo = Some(crate::interact::Objetivo { owner: id.clone(), cmd: st.cmd.clone(), label: st.label.clone() });
+            app.audio.play("tablet_tap", crate::audio::Cat::Interface, 0.5);
+        }
+    }
 }
 
 fn draw_apoio(app: &mut App, r: Rect) {

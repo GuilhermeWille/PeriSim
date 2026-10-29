@@ -44,6 +44,7 @@ Cada botão gera um **comando do terminal** (que aparece no terminal), então vo
 | Avaliação explicada + mentor adaptativo | Implementados |
 | Persistência (continuar caso, histórico, configurações) | Replay determinístico; gravação atômica; ao carregar, aponta a primeira entrada de auditoria que divergiu; salvamentos da v0.3 continuam carregando |
 | Interface 3D em primeira pessoa (colisão, mira, interação) + texturas + sombras + modo 2D leve + economia de energia | Implementados |
+| Interação física: bancada de ferramentas organizável, etapas na ordem com a ferramenta certa, indicadores de uso, cabos ponta a ponta, exame de perto, objetivo marcado | Implementada; um teste conclui todas as etapas de 80 casos (5 módulos × 4 dificuldades) sem travar na ordem |
 | Linux simulado na estação (desktop, terminal bash, arquivos, editor com cursor) | Implementado; replay do terminal reproduz a auditoria (testado) |
 | Preparação para modelos/texturas externos (`assets/`) | Substituição de texturas PNG/TGA validada; OBJ/MTL lido e validado; inventário com SHA‑256 dos originais |
 | Regras realistas do aparelho móvel: bateria em AFU, IMEI físico × lógico, ligar/desligar | Implementadas e testadas |
@@ -69,8 +70,8 @@ Na página **Releases** do repositório há um pacote por sistema:
 ## Executar (Linux x86_64)
 
 ```bash
-tar xzf pericia-sim-0.9.0-linux-x86_64.tar.gz
-cd pericia-sim-0.9.0-linux-x86_64
+tar xzf pericia-sim-0.10.0-linux-x86_64.tar.gz
+cd pericia-sim-0.10.0-linux-x86_64
 ./pericia-sim          # rodar direto
 ./install.sh           # ou instalar no menu de aplicativos (sem sudo)
 ```
@@ -95,7 +96,7 @@ No Hyprland o jogo abre por XWayland (é o padrão do Omarchy). Para tentar o ba
 3. Na pasta do projeto:
 
 ```bash
-cargo test --workspace              # 113 testes (motor, passo a passo, geração procedural, Linux simulado, celular, quadro, replay, assets)
+cargo test --workspace              # 118 testes (motor, passo a passo, geração procedural, Linux simulado, celular, quadro, replay, assets)
 cargo run --release -p pericia_app  # abre o simulador
 ```
 
@@ -105,7 +106,12 @@ No Windows e no macOS o mesmo comando gera o executável nativo (`target/release
 
 1. No menu, escolha o **POP**, a **dificuldade** (comece por *1 · Guiado*) e clique em **Iniciar novo caso**. Para repetir um caso, digite o ID (ex.: `C501-D2-00000007`).
 2. Ajuste volume e controles em **⚙ Configurações**, se quiser. Leia o caso: tecla **T** (tablet → **Missão**) ou, na Estação, aplicativo **Caso**. O mentor fica no tablet, em **Apoio**.
-3. No **Ambiente**: **WASD** anda (Shift corre), olhe com o **mouse** (travado no centro; o ponto é a mira), mire e clique/**E** para interagir. **Esc** ou **Tab** soltam o mouse e um clique na cena trava de novo; ele fica livre sozinho no tablet, na maleta, no quadro, no celular, na estação e no painel de um objeto. **+ / −** ajustam a sensibilidade (também em *Configurações → Controles*, de 0,1× a 5×). Comece pela maleta pericial (luvas, pulseira e a ferramenta da etapa); o painel do objeto mostra a próxima etapa e o ícone da ferramenta que falta.
+3. No **Ambiente**: **WASD** anda (Shift corre), olhe com o **mouse** (travado no centro; o ponto é a mira). **Esc** ou **Tab** soltam o mouse e um clique na cena trava de novo; ele fica livre sozinho no tablet, no quadro, no celular e na estação. **+ / −** ajustam a sensibilidade (também em *Configurações → Controles*, de 0,1× a 5×).
+   * **Bancada de ferramentas** (laboratório: junto à parede da frente; local de busca: a mesa de apoio): cada ferramenta, a caixa de luvas e a pulseira são objetos soltos. **E** pega, **G** larga a ferramenta da mão onde você mirar (bancada, mesa de exame ou mesa da estação) — organize como quiser, a arrumação fica salva.
+   * **Usar**: com a ferramenta certa na mão, mire o objeto e aperte **E**: o jogo faz a próxima etapa da lista que aquela ferramenta faz ali. Fora de ordem, ele diz qual etapa falta e com que ferramenta. Com uma ferramenta na mão, **losangos amarelos** marcam cada componente onde ela serve agora.
+   * **Cabos**: **E** numa ponta (ex.: a mídia retirada) e depois **E** na outra (ex.: o bloqueador); a ponta que falta fica marcada em verde.
+   * **Examinar**: **F** aproxima a câmera do objeto (o mouse gira, a roda aproxima) e mostra o que está escrito nele — fabricante, nº de série, lacre, IMEI, estado. No celular, **Enter** mostra a tela.
+   * **Objetivo**: no tablet → **Objeto**, cada objeto tem a lista de etapas na ordem; clique numa para marcá-la — ela aparece discretamente no canto da tela, com a ferramenta, e avança sozinha.
 4. Adquira a mídia (bloqueador → imagem → verificar hash) ou extraia o celular.
 5. Vá até a **Estação Pericial** e clique no monitor (ou use a aba no topo) — a sessão já abre com um terminal. Para voltar, **◄ Levantar da estação**. No Terminal: `lsblk`, `pericia imagem m-01`, `sudo mkdir -p /mnt/m01`, `sudo mount -o ro,loop ~/casos/<ID>/M-01.dd /mnt/m01`, `grep -ril <termo> /mnt/m01`, `stat`, `sha256sum`. Use também **Arquivos**, **Navegador** e **Linha do tempo** (menu *Aplicativos*).
 6. Quando achar a expressão, registre com `achei <expressão>`; no **Documento**, use *Pré‑preencher*, revise, escreva a conclusão separando fato de inferência, *Verificar coerência* e *Emitir e finalizar*.
