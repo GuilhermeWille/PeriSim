@@ -29,7 +29,7 @@ pub fn bench_geom(local: bool) -> (Vec3, f32, f32) {
     if local {
         (vec3(2.5, 0.72, 0.95), 1.8, 0.6)
     } else {
-        (vec3(-1.25, 0.90, 2.42), 1.8, 0.6)
+        (vec3(-1.25, 0.90, 2.68), 1.8, 0.6)
     }
 }
 
@@ -38,11 +38,11 @@ pub fn surfaces(local: bool) -> Vec<Surface> {
     let (c, l, d) = bench_geom(local);
     let mut v = vec![Surface { min: vec2(c.x - l / 2.0 + 0.03, c.z - d / 2.0 + 0.03), max: vec2(c.x + l / 2.0 - 0.03, c.z + d / 2.0 - 0.03), y: c.y }];
     if local {
-        v.push(Surface { min: vec2(-0.85, -1.4), max: vec2(0.85, -0.7), y: 0.765 }); // mesa do investigado
-        v.push(Surface { min: vec2(1.75, -2.12), max: vec2(3.15, -1.48), y: 0.75 }); // mesa da estação
+        v.push(Surface { min: vec2(-0.85, -2.85), max: vec2(0.85, -2.15), y: 0.765 }); // mesa do investigado
+        v.push(Surface { min: vec2(2.0, -2.92), max: vec2(3.4, -2.28), y: 0.75 }); // mesa da estação
     } else {
         v.push(Surface { min: vec2(-1.25, -0.95), max: vec2(1.25, 0.05), y: 0.905 }); // bancada de exame
-        v.push(Surface { min: vec2(-2.3, -2.82), max: vec2(-0.9, -2.18), y: 0.75 }); // mesa da estação
+        v.push(Surface { min: vec2(-2.3, -2.92), max: vec2(-0.9, -2.28), y: 0.75 }); // mesa da estação
     }
     v
 }
@@ -163,7 +163,13 @@ impl Bench {
         if !self.loaded {
             self.load();
         }
-        if items().iter().all(|id| self.map(local).contains_key(*id)) {
+        // móveis mudaram de lugar entre versões: o que ficou no ar volta para a bancada
+        let sup = surfaces(local);
+        let no_tampo = |p: &Vec3| sup.iter().any(|s| (p.y - s.y).abs() < 0.02 && p.x >= s.min.x - 0.05 && p.x <= s.max.x + 0.05 && p.z >= s.min.y - 0.05 && p.z <= s.max.y + 0.05);
+        let antes = self.map(local).len();
+        self.map(local).retain(|_, (p, _)| no_tampo(p));
+        let mudou = self.map(local).len() != antes;
+        if !mudou && items().iter().all(|id| self.map(local).contains_key(*id)) {
             return;
         }
         let layout = default_layout(r, local);

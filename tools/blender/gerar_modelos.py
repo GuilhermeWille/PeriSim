@@ -168,12 +168,23 @@ class Modelo:
         bm = self.bm
         bmesh.ops.remove_doubles(bm, verts=bm.verts, dist=1e-5)
         bm.normal_update()
-        # UV em metros por projeção de caixa (exceto telas)
+        # UV em metros por projeção de caixa (exceto telas); etiquetas: 0..1 na face, para
+        # que a etiqueta inteira apareça uma vez, alinhada às bordas (sem código de barras cortado)
+        etq = self.mats.index("etiqueta") if "etiqueta" in self.mats else -1
         for f in bm.faces:
             if f[self.fix]:
                 continue
             n = f.normal
             ax = max(range(3), key=lambda i: abs(n[i]))
+            a, b = (0, 1) if ax == 2 else ((1, 2) if ax == 0 else (0, 2))
+            if f.material_index == etq:
+                cs = [l.vert.co for l in f.loops]
+                lo_a, hi_a = min(c[a] for c in cs), max(c[a] for c in cs)
+                lo_b, hi_b = min(c[b] for c in cs), max(c[b] for c in cs)
+                for loop in f.loops:
+                    c = loop.vert.co
+                    loop[self.uv].uv = ((c[a] - lo_a) / max(hi_a - lo_a, 1e-6), (c[b] - lo_b) / max(hi_b - lo_b, 1e-6))
+                continue
             for loop in f.loops:
                 c = loop.vert.co
                 loop[self.uv].uv = (c.x, c.y) if ax == 2 else ((c.y, c.z) if ax == 0 else (c.x, c.z))
@@ -699,21 +710,69 @@ def _plug(m, loc, mat, rot=(0, 0, 0), tam=(0.014, 0.03, 0.008)):
     m.caixa(tam, loc, mat, 0.002, rot=rot)
 
 
+def tubo(m, pontos, raio, mat, segs=6):
+    """Cabo como sequência de cilindros ligando os pontos (sem frestas nas emendas)."""
+    for p, q in zip(pontos, pontos[1:]):
+        p, q = Vector(p), Vector(q)
+        d = q - p
+        if d.length < 1e-6:
+            continue
+        rot = Vector((0, 0, 1)).rotation_difference(d.normalized()).to_euler()
+        m.cilindro(raio, raio, d.length + raio * 0.6, (p + q) / 2, mat, segs=segs, rot=rot)
+
+
+def _plug_em(m, ponta, direcao, mat, tam, metal=None, tam_metal=None):
+    """Conector na ponta do cabo, alinhado com a direção de saída (x do conector = direção)."""
+    d = Vector(direcao).normalized()
+    yaw = math.atan2(d.y, d.x)
+    c = Vector(ponta) + d * (tam[0] / 2)
+    m.caixa(tam, tuple(c), mat, min(tam) * 0.25, rot=(0, 0, yaw))
+    if metal:
+        cm = Vector(ponta) + d * (tam[0] + tam_metal[0] / 2 - 0.0005)
+        m.caixa(tam_metal, tuple(cm), metal, 0.0004, rot=(0, 0, yaw))
+
+
+def bobina(m, mat, raio, voltas, z0, z1, a0, rcabo, plug_a, plug_b, cauda=0.03):
+    """Cabo enrolado de verdade: espiral contínua cujas duas pontas saem tangentes e
+    terminam nos conectores. plug = (material, tamanho, material_do_metal, tamanho_do_metal)."""
+    n = max(8, int(voltas * 18))
+    pts = []
+    for k in range(n + 1):
+        t = k / n
+        a = a0 + t * voltas * math.tau
+        r = raio * (1.0 - 0.12 * t)
+        pts.append((math.cos(a) * r, math.sin(a) * r, z0 + (z1 - z0) * t))
+
+    def tangente(i, sinal):
+        a = a0 + (i / n) * voltas * math.tau
+        return Vector((-math.sin(a), math.cos(a), 0)) * sinal
+
+    ta = tangente(0, -1)
+    tb = tangente(n, 1)
+    pa = Vector(pts[0]) + ta * cauda
+    pb = Vector(pts[-1]) + tb * cauda
+    tubo(m, [tuple(pa)] + pts + [tuple(pb)], rcabo, mat)
+    _plug_em(m, pa, ta, *plug_a)
+    _plug_em(m, pb, tb, *plug_b)
+
+
 def cabo_sata():
+    """Cabo SATA de dados (vermelho, conectores em L) e cabo de energia SATA (preto, conector
+    largo), cada um enrolado com as pontas nos conectores."""
     m = Modelo("cabo_sata")
-    anel(m, 0.06, 0.003, (0, 0, 0.006), "plastico_vermelho", segs=16, frac=0.85)
-    anel(m, 0.052, 0.003, (0, 0, 0.012), "plastico_preto", segs=16, frac=0.8)
-    _plug(m, (0.07, -0.02, 0.008), "plastico_vermelho", tam=(0.016, 0.026, 0.006))
-    _plug(m, (0.06, 0.035, 0.012), "plastico_preto", tam=(0.024, 0.022, 0.008))
+    bobina(m, "plastico_vermelho", 0.055, 1.5, 0.004, 0.008, 0.3, 0.0028,
+           ("plastico_vermelho", (0.014, 0.012, 0.007)), ("plastico_vermelho", (0.014, 0.012, 0.007)))
+    bobina(m, "plastico_preto", 0.045, 1.4, 0.011, 0.015, 2.4, 0.0028,
+           ("plastico_preto", (0.016, 0.024, 0.008)), ("plastico_preto", (0.016, 0.024, 0.008)))
     return m
 
 
 def _cabo_enrolado(nome, mat, plug_mat):
+    """Cabo USB enrolado: USB-A numa ponta (metal largo) e conector pequeno na outra."""
     m = Modelo(nome)
-    anel(m, 0.055, 0.0028, (0, 0, 0.004), mat, segs=16, frac=0.9)
-    anel(m, 0.048, 0.0028, (0, 0, 0.009), mat, segs=16, frac=0.9)
-    _plug(m, (0.06, -0.025, 0.006), plug_mat, tam=(0.012, 0.024, 0.006))
-    m.caixa((0.006, 0.01, 0.003), (0.06, -0.042, 0.006), "metal_cromado", 0.0005)
+    bobina(m, mat, 0.05, 1.6, 0.004, 0.012, 0.4, 0.0026,
+           (plug_mat, (0.018, 0.016, 0.008), "metal_cromado", (0.012, 0.012, 0.0045)),
+           (plug_mat, (0.014, 0.011, 0.006), "metal_cromado", (0.007, 0.008, 0.0028)))
     return m
 
 

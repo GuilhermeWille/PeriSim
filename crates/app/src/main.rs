@@ -16,6 +16,7 @@ mod audio;
 #[cfg(any(target_os = "windows", target_os = "macos"))]
 mod audio_out;
 mod bench;
+mod exterior;
 mod interact;
 mod config;
 mod steps;
@@ -116,6 +117,9 @@ pub struct App {
     pub fake_key: Option<KeyCode>,
     /// Quadros na cena no modo de pré-renderização da vista da janela.
     pub vista_n: u32,
+    /// Painel de tarefas na HUD (tecla O) e o último objeto com que o perito mexeu.
+    pub painel_tarefas: bool,
+    pub foco_dono: Option<String>,
     pub seat: (Vec3, f32),
     pub selected: Option<String>,
     pub hover_label: Option<String>,
@@ -216,6 +220,7 @@ impl App {
         self.exam = None;
         self.cabo = None;
         self.objetivo = None;
+        self.foco_dono = None;
     }
 
     pub fn start_case(&mut self, m: ModuleId, d: u8, seed: u32) {
@@ -665,7 +670,14 @@ fn hardware_inner(app: &mut App, area: Rect, modal: bool) {
     let mut r = app.renderer.take().unwrap();
     r.screen_tex = app.de.snapshot.clone();
     let fov = app.settings.fov_deg.to_radians();
-    let vista_cam = || Camera3D { position: world::VISTA_EYE, target: world::VISTA_EYE - vec3(1.0, 0.0, 0.0), up: vec3(0.0, 1.0, 0.0), fovy: world::VISTA_FOVY_DEG.to_radians(), aspect: Some(view.w / view.h), z_near: 0.05, z_far: 900.0, ..Default::default() };
+    // pré-renderização da vista: uma face de 90° por vez, em quadro quadrado
+    let face = ((app.vista_n / 8) as usize).min(3);
+    let lado = view.w.min(view.h).min(1024.0).floor();
+    let quadro = rect((view.x + (view.w - lado) / 2.0).floor(), (view.y + (view.h - lado) / 2.0).floor(), lado, lado);
+    let vista_cam = || {
+        let (_, f, up) = world::VISTA_FACES[face];
+        Camera3D { position: world::VISTA_EYE, target: world::VISTA_EYE + f, up, fovy: std::f32::consts::FRAC_PI_2, aspect: Some(1.0), z_near: 0.05, z_far: 900.0, ..Default::default() }
+    };
     let assar = world::assar_vista();
     let cam = match (&app.exam, &assar) {
         (_, Some(_)) => vista_cam(),
@@ -678,6 +690,9 @@ fn hardware_inner(app: &mut App, area: Rect, modal: bool) {
         _ => app.player.camera(view),
     };
     c.viewport = Some((view.x as i32, (screen_height() - view.y - view.h) as i32, view.w as i32, view.h as i32));
+    if assar.is_some() {
+        c.viewport = Some((quadro.x as i32, (screen_height() - quadro.y - quadro.h) as i32, quadro.w as i32, quadro.h as i32));
+    }
     let local_scene = sim.case.setting == Setting::Local;
     app.bench.ensure(&r, local_scene);
     let wrld = world::build(&mut r, sim, app.selected.as_deref(), app.hover_pick.as_deref(), &app.bench);
@@ -708,25 +723,26 @@ fn hardware_inner(app: &mut App, area: Rect, modal: bool) {
     }
     r.shadows = app.settings.shadows;
     r.flush(&lights, &c);
-    if let Some(path) = assar.as_ref() {
-        // pré-renderização da vista: grava a imagem da região da cena depois de estabilizar
+    if let Some(dir) = assar.as_ref() {
+        // grava a face depois de alguns quadros nela (PERICIA_ASSAR_VISTA = pasta de saída)
         app.vista_n += 1;
-        if app.vista_n == 12 {
+        if app.vista_n % 8 == 7 && app.vista_n < 8 * 4 {
             let img = get_screen_data();
             let (sw, sh) = (img.width as usize, img.height as usize);
-            let (x0, y0, w, h) = (view.x.max(0.0) as usize, view.y.max(0.0) as usize, view.w as usize, view.h as usize);
-            let mut out = Vec::with_capacity(w * h * 4);
-            // a tela vem de baixo para cima; export_png grava de baixo para cima: a ordem das
-            // linhas da região é mantida
-            for row in (sh - y0 - h)..(sh - y0) {
+            let (x0, y0, n) = (quadro.x as usize, quadro.y as usize, quadro.w as usize);
+            let mut out = Vec::with_capacity(n * n * 4);
+            // a tela vem de baixo para cima, e export_png grava de baixo para cima: mantém a ordem
+            for row in (sh - y0 - n)..(sh - y0) {
                 let i = (row * sw + x0) * 4;
-                out.extend_from_slice(&img.bytes[i..i + w * 4]);
+                out.extend_from_slice(&img.bytes[i..i + n * 4]);
             }
             for px in out.chunks_mut(4) {
                 px[3] = 255;
             }
-            Image { bytes: out, width: w as u16, height: h as u16 }.export_png(path);
-            eprintln!("[vista] gravada em {} ({}x{})", path, w, h);
+            let nome = world::VISTA_FACES[face].0.file_name();
+            let path = format!("{}/{}.png", dir, nome);
+            Image { bytes: out, width: n as u16, height: n as u16 }.export_png(&path);
+            eprintln!("[vista] {} ({}x{})", path, n, n);
         }
     }
     if let Some(alvo) = photo {
@@ -904,6 +920,9 @@ fn hardware_inner(app: &mut App, area: Rect, modal: bool) {
     let key = |k: KeyCode| is_key_pressed(k) || fk == Some(k);
     let pressed_e = !typing && !modal && !was_exam && key(KeyCode::E);
     let aimed = best.filter(|(t, _)| *t <= REACH).map(|(_, i)| wrld.picks[i].clone());
+    if !typing && !modal && key(KeyCode::O) {
+        app.painel_tarefas = !app.painel_tarefas;
+    }
     // G: largar a ferramenta da mão onde se mira (organizar a bancada)
     if !typing && !modal && !was_exam && key(KeyCode::G) {
         let yaw = app.player.yaw;
@@ -952,7 +971,7 @@ fn hardware_inner(app: &mut App, area: Rect, modal: bool) {
             interact::draw_exam(app, view);
         } else {
             interact::indicators(app, &cam, view, &wrld.picks, &all);
-            interact::objective_hud(app, view, &all);
+            interact::tasks_panel(app, view, &all);
         }
     }
     // dica discreta (controles completos: tablet → Apoio → Controles)
@@ -1860,6 +1879,8 @@ async fn main() {
         objetivo: None,
         fake_key: None,
         vista_n: 0,
+        painel_tarefas: true,
+        foco_dono: None,
         seat: (vec3(0.0, 0.0, 0.0), std::f32::consts::PI),
         selected: None,
         hover_label: None,

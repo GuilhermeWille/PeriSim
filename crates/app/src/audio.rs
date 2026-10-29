@@ -430,7 +430,8 @@ impl Audio {
             self.fade_out(id, 0.8);
         }
         if let Some(n) = name {
-            if let Some(id) = self.push(n, Cat::Ambiente, 0.8, 0.8, 1.0, true, 0.8) {
+            // ventoinha do PC da estação: bem leve, só um fundo (antes 0,8)
+            if let Some(id) = self.push(n, Cat::Ambiente, 0.15, 0.15, 1.0, true, 1.2) {
                 self.layer = Some((n.to_string(), id));
             }
         }

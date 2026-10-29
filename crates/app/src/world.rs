@@ -9,6 +9,9 @@ use pericia_core::model::*;
 use pericia_core::model::Vestigio;
 
 pub const EYE: f32 = 1.62;
+/// Escritório (local de busca): a mesa do investigado e o que está nela/ao redor ficam
+/// encostados na parede do fundo (deslocamento em z em relação ao leiaute original).
+pub const OFF_Z: f32 = -1.45;
 
 #[derive(Clone)]
 pub struct Pick {
@@ -68,7 +71,7 @@ pub fn build(r: &mut Renderer, sim: &Sim, selected: Option<&str>, hover: Option<
     room(r, local);
     // pontos de apoio para os itens
     let visible: Vec<&Item> = sim.case.items.iter().filter(|i| !i.hidden || i.flag("descoberto")).collect();
-    let (surface_y, span_x, base_z) = if local { (0.765, 1.5, -1.05) } else { (0.905, 2.0, -0.45) };
+    let (surface_y, span_x, base_z) = if local { (0.765, 1.5, -1.05 + OFF_Z) } else { (0.905, 2.0, -0.45) };
     if local {
         office(r, &mut w);
     } else {
@@ -80,10 +83,10 @@ pub fn build(r: &mut Renderer, sim: &Sim, selected: Option<&str>, hover: Option<
         let x = -span_x / 2.0 + (k as f32 + 0.5) * (span_x / n);
         let mut base = vec3(x, surface_y, base_z);
         if local && it.hidden {
-            base = vec3(1.45, 0.50, -0.70); // dentro da gaveta aberta
+            base = vec3(1.45, 0.50, -0.70 + OFF_Z); // dentro da gaveta aberta
         }
         if local && it.kind.is_computer() && !it.power_on && it.id != "ITEM-01" {
-            base = vec3(0.55, 0.0, -1.15); // gabinete no piso, sob a mesa
+            base = vec3(0.55, 0.0, -1.15 + OFF_Z); // gabinete no piso, sob a mesa
         }
         let half = draw_item(r, sim, it, base);
         r.shadow(base, half);
@@ -99,7 +102,7 @@ pub fn build(r: &mut Renderer, sim: &Sim, selected: Option<&str>, hover: Option<
     decor(r, local, &mut w, sim);
     vestigios(r, sim, &mut w, &item_spots, local, selected, hover);
     // bloqueador de escrita: na bancada de exame (laboratório) ou na mesa da estação portátil (local)
-    let tools_at = if local { vec3(1.92, 0.75, -1.72) } else { vec3(-0.9, 0.905, 0.0) };
+    let tools_at = if local { vec3(2.17, 0.75, -2.52) } else { vec3(-0.9, 0.905, 0.0) };
     let wb_on = sim.hashes.keys().any(|k| k.starts_with("wb:"));
     tool_writeblocker(r, tools_at, wb_on);
     w.picks.push(Pick { id: "TOOL-WB".into(), center: tools_at + vec3(0.0, 0.04, 0.0), half: vec3(0.12, 0.05, 0.08), label: "Bloqueador de escrita".into() });
@@ -203,13 +206,13 @@ fn decor(r: &mut Renderer, local: bool, w: &mut World, sim: &Sim) {
         on_wall(r, "relogio_parede", 'B', -1.25, 1.85);
         board_wall(r, w, -1.6, 1.0);
         // objetos pessoais na mesa do investigado
-        r.model("porta_retrato", vec3(0.72, 0.765, -1.33), 0.25, &[]);
-        r.model("cinzeiro", vec3(-0.72, 0.765, -1.3), 0.0, &[]);
+        r.model("porta_retrato", vec3(0.72, 0.765, -1.33 + OFF_Z), 0.25, &[]);
+        r.model("cinzeiro", vec3(-0.72, 0.765, -1.3 + OFF_Z), 0.0, &[]);
         if sim.case.vestigios.iter().any(|v| v.kind == "copo") {
-            r.model("copo_cafe", vec3(0.42, 0.765, -1.32), 0.0, &[]);
+            r.model("copo_cafe", vec3(0.42, 0.765, -1.32 + OFF_Z), 0.0, &[]);
         }
-        r.model("lixeira", vec3(1.05, 0.0, -0.35), 0.0, &[]);
-        w.colliders.push(col((0.88, -0.52), (1.22, -0.18)));
+        r.model("lixeira", vec3(1.05, 0.0, -0.35 + OFF_Z), 0.0, &[]);
+        w.colliders.push(col((0.88, -0.52 + OFF_Z), (1.22, -0.18 + OFF_Z)));
     } else {
         on_wall(r, "placa_lab", 'B', 0.62, 2.22);
         on_wall(r, "quadro_branco", 'B', 0.65, 1.0);
@@ -236,14 +239,30 @@ fn decal(r: &mut Renderer, c: Vec3, size: f32, rot: f32, color: Color) {
 }
 
 /// Fio de cabelo: segmentos finos numa curva suave.
-fn hair(r: &mut Renderer, start: Vec3, len: f32, seed: f32) {
+/// Fio de cabelo: segmentos finos que serpenteiam. Com `limite` (centro e meia-extensão no
+/// plano XZ), o fio fica inteiro sobre a superfície onde está — não sai pela borda do objeto.
+fn hair(r: &mut Renderer, start: Vec3, len: f32, seed: f32, limite: Option<(Vec3, Vec2)>) {
     let n = 14;
+    let len = match limite {
+        Some((_, h)) => len.min(h.x.min(h.y) * 1.7),
+        None => len,
+    };
     let mut p = start;
     let mut a = seed;
     let seg = len / n as f32;
     for k in 0..n {
         a += (seed * 3.1 + k as f32 * 0.9).sin() * 0.35;
-        let q = p + vec3(a.cos() * seg, 0.0, a.sin() * seg);
+        let mut q = p + vec3(a.cos() * seg, 0.0, a.sin() * seg);
+        if let Some((c, h)) = limite {
+            // na borda, o fio "dobra" para dentro
+            let (mx, mz) = (h.x * 0.88, h.y * 0.88);
+            if (q.x - c.x).abs() > mx || (q.z - c.z).abs() > mz {
+                a += std::f32::consts::PI * 0.6;
+                q = p + vec3(a.cos() * seg, 0.0, a.sin() * seg);
+                q.x = q.x.clamp(c.x - mx, c.x + mx);
+                q.z = q.z.clamp(c.z - mz, c.z + mz);
+            }
+        }
         r.boxr((p + q) / 2.0, vec3(seg * 1.1, 0.0012, 0.0016), -a, plain(rgb(38, 26, 20)));
         p = q;
     }
@@ -260,15 +279,15 @@ fn vestigio_pos(v: &Vestigio, spots: &[(String, Vec3, Vec3, Vec3)], local: bool)
         }
         "piso_mesa" => {
             if v.kind == "pegada" {
-                vec3(0.62, 0.009, -0.38)
+                vec3(0.62, 0.009, -0.38 + OFF_Z)
             } else {
-                vec3(0.38, 0.009, -0.55)
+                vec3(0.38, 0.009, -0.55 + OFF_Z)
             }
         }
-        "teclado" => vec3(-0.18, 0.771, -0.78),
-        "cinzeiro" => vec3(-0.72, 0.80, -1.3),
-        "mesa" => vec3(0.42, 0.87, -1.32),
-        _ => if local { vec3(0.0, 0.77, -0.9) } else { vec3(0.0, 0.91, -0.2) },
+        "teclado" => vec3(-0.18, 0.771, -0.78 + OFF_Z),
+        "cinzeiro" => vec3(-0.72, 0.80, -1.3 + OFF_Z),
+        "mesa" => vec3(0.42, 0.87, -1.32 + OFF_Z),
+        _ => if local { vec3(0.0, 0.77, -0.9 + OFF_Z) } else { vec3(0.0, 0.91, -0.2) },
     }
 }
 
@@ -298,7 +317,8 @@ fn vestigios(r: &mut Renderer, sim: &Sim, w: &mut World, spots: &[(String, Vec3,
                 vec3(0.08, 0.03, 0.1)
             }
             "cabelo" => {
-                hair(r, p, if v.spot == "item" { 0.12 } else { 0.2 }, seed);
+                let limite = if v.spot == "item" { spots.iter().find(|s| Some(&s.0) == v.on_item.as_ref()).map(|s| (s.2, vec2(s.3.x, s.3.z))) } else { None };
+                hair(r, p, if v.spot == "item" { 0.12 } else { 0.2 }, seed, limite);
                 vec3(0.08, 0.02, 0.06)
             }
             _ => vec3(0.07, 0.06, 0.07),
@@ -389,8 +409,8 @@ fn out_box(r: &mut Renderer, c: Vec3, size: Vec3, t: Tex, tile: f32, base: [f32;
 /// distância do plano onde a imagem é exibida. Do interior da sala a imagem plana tem a mesma
 /// perspectiva da cena 3D original (exata do ponto de captura, muito próxima de qualquer outro).
 pub const VISTA_EYE: Vec3 = Vec3::new(-2.0, 1.55, 0.75);
-pub const VISTA_FOVY_DEG: f32 = 78.0;
-pub const VISTA_PLANO_X: f32 = -30.0;
+/// Meia-aresta da caixa de paisagem (cada face a 32 m do ponto de captura).
+pub const VISTA_MEIA: f32 = 32.0;
 
 /// Modo de pré-renderização da vista (PERICIA_ASSAR_VISTA=<arquivo.png>): só a paisagem.
 pub fn assar_vista() -> Option<String> {
@@ -412,17 +432,31 @@ fn outside_near(r: &mut Renderer, wall: M) {
     r.boxr(vec3(-3.56, 1.5, 0.75), vec3(0.008, 1.2, 1.5), 0.0, M { t: Tex::Glass, c: Color::new(0.82, 0.9, 0.98, 0.16), tile: 1.5, spec: 1.0, emis: false });
 }
 
-/// A paisagem como uma imagem num plano distante (uma face em vez de milhares).
+/// Faces da caixa de paisagem: (textura, direção da câmera, "cima" da imagem).
+pub const VISTA_FACES: [(Tex, Vec3, Vec3); 4] = [
+    (Tex::Vista, Vec3::new(-1.0, 0.0, 0.0), Vec3::new(0.0, 1.0, 0.0)),
+    (Tex::VistaE, Vec3::new(0.0, 0.0, 1.0), Vec3::new(0.0, 1.0, 0.0)),
+    (Tex::VistaD, Vec3::new(0.0, 0.0, -1.0), Vec3::new(0.0, 1.0, 0.0)),
+    (Tex::VistaB, Vec3::new(0.0, -1.0, 0.0), Vec3::new(-1.0, 0.0, 0.0)),
+];
+
+/// A paisagem distante como caixa de imagens (frente, laterais e chão, 90° cada) em volta do
+/// ponto da janela: de qualquer ângulo pela janela não há borda à vista. Na frente dela, as
+/// árvores e os carros em 3D (animados).
 fn outside_flat(r: &mut Renderer) {
-    let aspect = r.tex.get(&Tex::Vista).map(|t| t.width() / t.height().max(1.0)).filter(|a| a.is_finite() && *a > 0.2).unwrap_or(2.0);
-    let l = VISTA_EYE.x - VISTA_PLANO_X;
-    let hh = l * (VISTA_FOVY_DEG.to_radians() / 2.0).tan();
-    let hw = hh * aspect;
-    let (x, y, z) = (VISTA_PLANO_X, VISTA_EYE.y, VISTA_EYE.z);
-    // olhando para −X, a direita da imagem fica em −Z; v = 0 no alto
-    r.quad(Tex::Vista, [vec3(x, y + hh, z + hw), vec3(x, y + hh, z - hw), vec3(x, y - hh, z - hw), vec3(x, y - hh, z + hw)], [vec2(0.0, 0.0), vec2(1.0, 0.0), vec2(1.0, 1.0), vec2(0.0, 1.0)], vec3(1.0, 0.0, 0.0), WHITE, 0.0, true);
-    // borda: céu acima e chão abaixo, para olhares muito inclinados pela janela
-    r.quad(Tex::Sky, [vec3(x, y + hh * 3.0, z + hw * 2.0), vec3(x, y + hh * 3.0, z - hw * 2.0), vec3(x, y + hh - 0.01, z - hw * 2.0), vec3(x, y + hh - 0.01, z + hw * 2.0)], [vec2(0.0, 0.0); 4], vec3(1.0, 0.0, 0.0), Color::new(0.38, 0.58, 0.86, 1.0), 0.0, true);
+    let l = VISTA_MEIA;
+    for (t, f, up) in VISTA_FACES {
+        let rt = f.cross(up).normalize();
+        let c = VISTA_EYE + f * l;
+        let (rr, uu) = (rt * l, up * l);
+        // v = 0 no alto da imagem; u = 0 à esquerda
+        r.quad(t, [c - rr + uu, c + rr + uu, c + rr - uu, c - rr - uu], [vec2(0.0, 0.0), vec2(1.0, 0.0), vec2(1.0, 1.0), vec2(0.0, 1.0)], -f, WHITE, 0.0, true);
+    }
+    // teto: céu
+    let y = VISTA_EYE.y + l;
+    let (x0, x1, z0, z1) = (VISTA_EYE.x - l, VISTA_EYE.x + l, VISTA_EYE.z - l, VISTA_EYE.z + l);
+    r.quad(Tex::Sky, [vec3(x0, y, z0), vec3(x1, y, z0), vec3(x1, y, z1), vec3(x0, y, z1)], [vec2(0.0, 0.0); 4], vec3(0.0, -1.0, 0.0), Color::new(0.42, 0.6, 0.88, 1.0), 0.0, true);
+    crate::exterior::rua_viva(r, get_time() as f32);
 }
 
 /// A paisagem 3D completa (usada só para pré-renderizar a imagem da vista).
@@ -436,36 +470,11 @@ fn outside_far(r: &mut Renderer) {
     for k in -12..12 {
         out_box(r, vec3(-21.0, gy + 0.045, k as f32 * 6.0), vec3(0.15, 0.01, 2.5), Tex::White, 1.0, [0.95, 0.92, 0.6]); // faixa
     }
-    // carros estacionados (blocos simples, cores variadas)
-    for (k, z) in [-22.0f32, -9.0, 4.0, 15.0, 31.0].iter().enumerate() {
-        let c = [[0.7, 0.12, 0.1], [0.85, 0.85, 0.88], [0.15, 0.2, 0.35], [0.2, 0.2, 0.22], [0.75, 0.7, 0.55]][k];
-        let x = if k % 2 == 0 { -15.2 } else { -26.8 };
-        out_box(r, vec3(x, gy + 0.55, *z), vec3(1.8, 0.7, 4.2), Tex::White, 1.0, c);
-        out_box(r, vec3(x, gy + 1.15, *z - 0.2), vec3(1.6, 0.55, 2.2), Tex::White, 1.0, [c[0] * 0.6, c[1] * 0.6, c[2] * 0.7]);
-    }
-    // árvores nas calçadas (copas na altura do 2º e 3º andar)
     let mut seed = 7u32;
     let mut rnd = || {
         seed = seed.wrapping_mul(1103515245).wrapping_add(12345);
         ((seed >> 16) & 0x7fff) as f32 / 32767.0
     };
-    for side in [-12.0f32, -30.5] {
-        let mut z = -60.0;
-        while z < 60.0 {
-            let hgt = 5.5 + rnd() * 3.0;
-            out_box(r, vec3(side, gy + hgt / 2.0, z), vec3(0.35, hgt, 0.35), Tex::Ground, 1.0, [0.38, 0.28, 0.2]);
-            let cw = 3.0 + rnd() * 1.5;
-            // copa em vários volumes desencontrados (menos "caixa")
-            for j in 0..5 {
-                let a = j as f32 * 1.3 + rnd();
-                let off = vec3(a.cos() * cw * 0.3, (j % 3) as f32 * cw * 0.22, a.sin() * cw * 0.3);
-                let sz = cw * (0.55 + rnd() * 0.3);
-                let leaf = [0.22 + rnd() * 0.1, 0.40 + rnd() * 0.14, 0.20 + rnd() * 0.05];
-                out_box(r, vec3(side, gy + hgt, z) + off, vec3(sz, sz * 0.75, sz), Tex::Ground, 1.0, leaf);
-            }
-            z += 9.0 + rnd() * 6.0;
-        }
-    }
     // prédios do outro lado da rua (frente para +X, de frente para a janela)
     let mut z = -70.0;
     while z < 70.0 {
@@ -504,7 +513,8 @@ fn room(r: &mut Renderer, local: bool) {
     let floor = if local { m(Tex::WoodFloor, rgb(255, 255, 255), 1.6, 0.25) } else { m(Tex::Vinyl, rgb(255, 255, 255), 1.2, 0.35) };
     r.bx(vec3(0.0, -0.05, 0.0), vec3(w, 0.1, d), floor);
     r.bx(vec3(0.0, h + 0.05, 0.0), vec3(w, 0.1, d), m(Tex::Ceiling, rgb(255, 255, 255), 1.2, 0.0));
-    let wall = if local { m(Tex::Wall, rgb(236, 226, 205), 2.0, 0.05) } else { m(Tex::Wall, rgb(222, 228, 232), 2.0, 0.05) };
+    // laboratório: verde-marinho claro em cima (abaixo do friso, o lambri verde-marinho escuro)
+    let wall = if local { m(Tex::Wall, rgb(236, 226, 205), 2.0, 0.05) } else { m(Tex::Wall, rgb(128, 172, 162), 2.0, 0.05) };
     // paredes (com abertura de janela na esquerda e porta na frente)
     r.bx(vec3(0.0, h / 2.0, -d / 2.0 - 0.05), vec3(w + 0.2, h, 0.1), wall);
     r.bx(vec3(w / 2.0 + 0.05, h / 2.0, 0.0), vec3(0.1, h, d + 0.2), wall);
@@ -526,10 +536,16 @@ fn room(r: &mut Renderer, local: bool) {
     r.bx(vec3(2.0, 2.45, d / 2.0 + 0.05), vec3(1.0, 0.7, 0.1), wall);
     r.bx(vec3(2.0, 1.05, d / 2.0 + 0.03), vec3(0.92, 2.1, 0.05), m(Tex::Wood, rgb(200, 190, 175), 0.8, 0.3));
     r.bx(vec3(1.66, 1.0, d / 2.0 - 0.0), vec3(0.12, 0.03, 0.04), metal(rgb(200, 200, 205)));
-    // rodapés
-    let base = plain(if local { rgb(150, 120, 90) } else { rgb(90, 96, 104) });
+    // rodapés nas quatro paredes (a da frente sem a porta)
+    let base = plain(if local { rgb(150, 120, 90) } else { rgb(30, 64, 58) });
     r.bx(vec3(0.0, 0.05, -d / 2.0 + 0.01), vec3(w, 0.1, 0.02), base);
     r.bx(vec3(w / 2.0 - 0.01, 0.05, 0.0), vec3(0.02, 0.1, d), base);
+    r.bx(vec3(-w / 2.0 + 0.01, 0.05, 0.0), vec3(0.02, 0.1, d), base);
+    r.bx(vec3(-1.0, 0.05, d / 2.0 - 0.01), vec3(5.0, 0.1, 0.02), base);
+    r.bx(vec3(3.0, 0.05, d / 2.0 - 0.01), vec3(1.0, 0.1, 0.02), base);
+    if !local {
+        lab_walls(r, w, d);
+    }
     // luminárias embutidas (emissivas)
     for (x, z) in [(-1.2, -0.4), (1.4, 0.9)] {
         r.bx(vec3(x, h - 0.01, z), vec3(1.2, 0.02, 0.6), metal(rgb(230, 230, 232)));
@@ -538,6 +554,39 @@ fn room(r: &mut Renderer, local: bool) {
     // tomada e interruptor
     r.bx(vec3(1.2, 0.3, -d / 2.0 + 0.005), vec3(0.08, 0.12, 0.01), plain(rgb(240, 240, 240)));
     r.bx(vec3(2.65, 1.2, d / 2.0 - 0.005), vec3(0.08, 0.12, 0.01), plain(rgb(240, 240, 240)));
+}
+
+/// Paredes do laboratório: lambri verde-marinho escuro até abaixo do peitoril, friso branco,
+/// quadros com certificados e a placa de saída acesa sobre a porta.
+fn lab_walls(r: &mut Renderer, w: f32, d: f32) {
+    let lambri = m(Tex::Wall, rgb(44, 96, 88), 2.0, 0.08);
+    let friso = plain(rgb(236, 238, 234));
+    let (y0, y1) = (0.1, 0.84);
+    let (cy, hy) = ((y0 + y1) / 2.0, y1 - y0);
+    // (centro, tamanho) de cada trecho, encostado por dentro em cada parede
+    let trechos = [
+        (vec3(0.0, cy, -d / 2.0 + 0.006), vec3(w, hy, 0.012)),
+        (vec3(w / 2.0 - 0.006, cy, 0.0), vec3(0.012, hy, d)),
+        (vec3(-w / 2.0 + 0.006, cy, 0.0), vec3(0.012, hy, d)),
+        (vec3(-1.0, cy, d / 2.0 - 0.006), vec3(5.0, hy, 0.012)),
+        (vec3(3.0, cy, d / 2.0 - 0.006), vec3(1.0, hy, 0.012)),
+    ];
+    for (c, sz) in trechos {
+        r.bx(c, sz, lambri);
+        // friso: um pouco mais saliente que o lambri
+        let fr = vec3(if sz.x < 0.1 { 0.03 } else { sz.x }, 0.035, if sz.z < 0.1 { 0.03 } else { sz.z });
+        r.bx(vec3(c.x, y1 + 0.017, c.z), fr, friso);
+    }
+    // certificados emoldurados na parede direita (livre entre o armário e a estante)
+    for (k, z) in [-1.75f32, -1.1].iter().enumerate() {
+        let c = vec3(w / 2.0 - 0.012, 1.62, *z);
+        r.bx(c, vec3(0.02, 0.42, 0.33), plain(rgb(40, 34, 30)));
+        r.bx(c - vec3(0.011, 0.0, 0.0), vec3(0.004, 0.36, 0.27), m(if k == 0 { Tex::Document } else { Tex::Calendar }, WHITE, 1.0, 0.1));
+    }
+    // placa de saída acesa sobre a porta
+    let sc = vec3(2.0, 2.28, d / 2.0 - 0.012);
+    r.bx(sc, vec3(0.34, 0.12, 0.02), plain(rgb(240, 240, 238)));
+    r.bx(sc - vec3(0.0, 0.0, 0.011), vec3(0.3, 0.09, 0.004), glow(rgb(40, 200, 90)));
 }
 
 fn table(r: &mut Renderer, c: Vec3, size: Vec3, top: M, legs: M) {
@@ -632,7 +681,7 @@ fn lab(r: &mut Renderer, w: &mut World) {
     }
     w.colliders.push(col((-1.32, -1.0), (1.32, 0.1)));
     // estação pericial junto à parede do fundo
-    workstation(r, vec3(-1.6, 0.0, -2.5), w);
+    workstation(r, vec3(-1.6, 0.0, -2.6), w);
     // armário de evidências e estante
     if r.model("armario_aco", vec3(2.6, 0.0, -2.65), 0.0, &[]) {
         r.bx(vec3(2.6, 1.6, -2.325), vec3(0.3, 0.12, 0.005), m(Tex::Label, WHITE, 0.3, 0.0));
@@ -645,7 +694,7 @@ fn lab(r: &mut Renderer, w: &mut World) {
         r.bx(vec3(2.6, 1.6, -2.34), vec3(0.3, 0.12, 0.005), m(Tex::Label, WHITE, 0.3, 0.0));
     }
     w.colliders.push(col((2.1, -2.95), (3.1, -2.35)));
-    shelf(r, vec3(3.05, 0.0, 0.2), w);
+    shelf(r, vec3(3.27, 0.0, 0.2), w);
 }
 
 fn shelf(r: &mut Renderer, c: Vec3, w: &mut World) {
@@ -669,19 +718,19 @@ fn shelf(r: &mut Renderer, c: Vec3, w: &mut World) {
 
 fn office(r: &mut Renderer, w: &mut World) {
     // tapete, mesa de trabalho do investigado, cadeira, gaveteiro, estante, planta
-    r.bx(vec3(0.0, 0.003, -0.4), vec3(2.6, 0.006, 1.8), m(Tex::Rug, WHITE, 2.6, 0.0));
-    if !r.model("mesa_escritorio", vec3(0.0, 0.0, -1.05), 0.0, &[]) {
-        table(r, vec3(0.0, 0.0, -1.05), vec3(1.8, 0.76, 0.8), m(Tex::Wood, WHITE, 0.9, 0.4), m(Tex::Wood, rgb(160, 140, 120), 0.6, 0.2));
+    r.bx(vec3(0.0, 0.003, -0.4 + OFF_Z * 0.6), vec3(2.6, 0.006, 1.8), m(Tex::Rug, WHITE, 2.6, 0.0));
+    if !r.model("mesa_escritorio", vec3(0.0, 0.0, -1.05 + OFF_Z), 0.0, &[]) {
+        table(r, vec3(0.0, 0.0, -1.05 + OFF_Z), vec3(1.8, 0.76, 0.8), m(Tex::Wood, WHITE, 0.9, 0.4), m(Tex::Wood, rgb(160, 140, 120), 0.6, 0.2));
     }
-    w.colliders.push(col((-0.95, -1.5), (0.95, -0.6)));
-    chair(r, vec3(0.0, 0.0, -0.35), 0.0);
+    w.colliders.push(col((-0.95, -1.5 + OFF_Z), (0.95, -0.6 + OFF_Z)));
+    chair(r, vec3(0.0, 0.0, -0.35 + OFF_Z), 0.0);
     // gaveteiro com gaveta aberta (onde pode haver mídia camuflada)
-    let gv = vec3(1.45, 0.0, -1.0);
+    let gv = vec3(1.45, 0.0, -1.0 + OFF_Z);
     if !r.model("gaveteiro", gv, 0.0, &[]) {
         r.bx(gv + vec3(0.0, 0.35, 0.0), vec3(0.45, 0.7, 0.55), m(Tex::Wood, rgb(210, 190, 170), 0.6, 0.3));
         r.bx(gv + vec3(0.0, 0.48, 0.32), vec3(0.4, 0.13, 0.1), m(Tex::Wood, rgb(200, 180, 160), 0.6, 0.3));
     }
-    w.colliders.push(col((1.2, -1.3), (1.7, -0.6)));
+    w.colliders.push(col((1.2, -1.3 + OFF_Z), (1.7, -0.6 + OFF_Z)));
     // estante com livros
     let est = vec3(-2.6, 0.0, -2.75);
     let est_model = r.model("estante_livros", est, 0.0, &[]);
@@ -728,7 +777,7 @@ fn office(r: &mut Renderer, w: &mut World) {
     }
     w.colliders.push(col((-3.15, 2.05), (-2.65, 2.55)));
     // mesa de apoio do perito com a estação portátil
-    workstation(r, vec3(2.45, 0.0, -1.8), w);
+    workstation(r, vec3(2.7, 0.0, -2.6), w);
     // mesa de apoio do perito = bancada de ferramentas do local
     let (bc, bl, bd) = crate::bench::bench_geom(true);
     table(r, vec3(bc.x, 0.0, bc.z), vec3(bl, bc.y, bd), metal(rgb(150, 154, 160)), metal(rgb(90, 92, 98)));
@@ -808,7 +857,13 @@ fn seal(r: &mut Renderer, c: Vec3, size: Vec3, intact: bool) {
 fn hdd(r: &mut Renderer, at: Vec3, sealed: bool) {
     if r.model("hd_35", at - vec3(0.0, 0.013, 0.0), 0.0, &[]) {
         if sealed {
-            seal(r, at + vec3(0.0, 0.0142, -0.02), vec3(0.11, 0.0006, 0.02), true);
+            {
+            // lacre na largura exata do disco, dobrado pelas laterais
+            seal(r, at + vec3(0.0, 0.0142, -0.02), vec3(0.1032, 0.0006, 0.02), true);
+            for sx in [-1.0f32, 1.0] {
+                seal(r, at + vec3(sx * 0.0516, 0.0072, -0.02), vec3(0.0006, 0.014, 0.02), true);
+            }
+        }
         }
         return;
     }
@@ -819,7 +874,13 @@ fn hdd(r: &mut Renderer, at: Vec3, sealed: bool) {
         r.cyl(at + vec3(-0.04 + (k % 2) as f32 * 0.08, 0.0135, -0.06 + (k / 2) as f32 * 0.12), 0.003, 0.001, metal(rgb(110, 110, 116)));
     }
     if sealed {
-        seal(r, at + vec3(0.0, 0.0142, -0.02), vec3(0.11, 0.0006, 0.02), true);
+        {
+            // lacre na largura exata do disco, dobrado pelas laterais
+            seal(r, at + vec3(0.0, 0.0142, -0.02), vec3(0.1032, 0.0006, 0.02), true);
+            for sx in [-1.0f32, 1.0] {
+                seal(r, at + vec3(sx * 0.0516, 0.0072, -0.02), vec3(0.0006, 0.014, 0.02), true);
+            }
+        }
     }
 }
 

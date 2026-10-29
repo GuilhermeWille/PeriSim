@@ -49,8 +49,11 @@ pub enum Tex {
     Facade,
     Ground,
     CorkPlain,
-    /// Vista da janela pré-renderizada (imagem plana, sem luz nem névoa).
+    /// Vista da janela pré-renderizada: caixa de 4 faces (frente, esquerda, direita, chão).
     Vista,
+    VistaE,
+    VistaD,
+    VistaB,
 }
 
 impl Tex {
@@ -78,7 +81,7 @@ impl Tex {
             Tex::Concrete => "concreto",
             Tex::Glass => "vidro",
             Tex::Blob => "sombra_contato",
-            Tex::Outside => "vista_janela",
+            Tex::Outside => "janela_exterior_antiga",
             Tex::Cork => "quadro_cortica",
             Tex::Whiteboard => "quadro_branco",
             Tex::PosterPop => "cartaz_pop",
@@ -90,7 +93,10 @@ impl Tex {
             Tex::Document => "documento",
             Tex::Blood => "mancha",
             Tex::Sky => "ceu",
-            Tex::Vista => "vista_janela",
+            Tex::Vista => "vista_frente",
+            Tex::VistaE => "vista_esquerda",
+            Tex::VistaD => "vista_direita",
+            Tex::VistaB => "vista_chao",
             Tex::Facade => "fachada",
             Tex::Ground => "chao_externo",
             Tex::CorkPlain => "cortica_lisa",
@@ -98,14 +104,14 @@ impl Tex {
     }
     /// Imagem aplicada com UV 0..1 (quadros, cartazes, mostradores): não repete.
     pub fn is_image(self) -> bool {
-        matches!(self, Tex::Cork | Tex::CorkPlain | Tex::Whiteboard | Tex::PosterPop | Tex::PosterEpi | Tex::Painting | Tex::Calendar | Tex::SignLab | Tex::ClockFace | Tex::Document | Tex::Blood | Tex::Vista)
+        matches!(self, Tex::Cork | Tex::CorkPlain | Tex::Whiteboard | Tex::PosterPop | Tex::PosterEpi | Tex::Painting | Tex::Calendar | Tex::SignLab | Tex::ClockFace | Tex::Document | Tex::Blood | Tex::Vista | Tex::VistaE | Tex::VistaD | Tex::VistaB)
     }
 }
 
-pub const ALL_TEX: [Tex; 36] = [
+pub const ALL_TEX: [Tex; 39] = [
     Tex::White, Tex::Wood, Tex::WoodFloor, Tex::Vinyl, Tex::Wall, Tex::Ceiling, Tex::Metal, Tex::Plastic, Tex::Fabric, Tex::Mat, Tex::Vent, Tex::Keyboard, Tex::Label, Tex::Rug,
     Tex::Leaf, Tex::Cardboard, Tex::Screen, Tex::Concrete, Tex::Glass, Tex::Blob, Tex::Outside, Tex::Cork, Tex::Whiteboard, Tex::PosterPop, Tex::PosterEpi,
-    Tex::Painting, Tex::Calendar, Tex::SignLab, Tex::ClockFace, Tex::Document, Tex::Blood, Tex::Sky, Tex::Facade, Tex::Ground, Tex::CorkPlain, Tex::Vista,
+    Tex::Painting, Tex::Calendar, Tex::SignLab, Tex::ClockFace, Tex::Document, Tex::Blood, Tex::Sky, Tex::Facade, Tex::Ground, Tex::CorkPlain, Tex::Vista, Tex::VistaE, Tex::VistaD, Tex::VistaB,
 ];
 
 fn hash(x: i32, y: i32, s: u32) -> f32 {
@@ -281,7 +287,7 @@ pub fn gen(t: Tex) -> Vec<u8> {
                 Tex::Calendar | Tex::ClockFace => [0.98, 0.98, 0.97],
                 Tex::SignLab => [0.09, 0.2, 0.38],
                 Tex::Blood => [0.30, 0.06, 0.05],
-                Tex::Sky | Tex::Vista => {
+                Tex::Sky | Tex::Vista | Tex::VistaE | Tex::VistaD | Tex::VistaB => {
                     // céu: v = 0 no alto; nuvens esparsas, horizonte mais claro
                     let h = 1.0 - v;
                     let sky = mix([0.80, 0.86, 0.92], [0.38, 0.58, 0.86], h.powf(0.7));
@@ -505,7 +511,7 @@ pub fn material_tex(name: &str) -> (Tex, f32, f32, bool) {
         "manta" => (Tex::Mat, 0.5, 0.1, false),
         "grade" => (Tex::Vent, 0.08, 0.2, false),
         "teclado" => (Tex::Keyboard, 0.07, 0.2, false),
-        "etiqueta" => (Tex::Label, 0.3, 0.0, false),
+        "etiqueta" => (Tex::Label, 1.0, 0.0, false), // UV 0..1 por face (gerar_modelos.py): a etiqueta inteira, uma vez
         "papelao" => (Tex::Cardboard, 0.4, 0.05, false),
         "folhagem" => (Tex::Leaf, 0.3, 0.2, false),
         "concreto" | "ceramica" => (Tex::Concrete, 0.4, 0.1, false),
@@ -687,7 +693,7 @@ impl Renderer {
             gl_use_material(self.depth_mat.as_ref().unwrap());
             for &i in &order {
                 let (t, v, idx) = &batches[i];
-                if idx.is_empty() || matches!(t, Tex::Blob | Tex::Glass | Tex::Outside | Tex::Wall | Tex::Ceiling | Tex::Sky | Tex::Facade | Tex::Ground | Tex::Vista) || v.iter().any(|x| x.color[3] < 255) {
+                if idx.is_empty() || matches!(t, Tex::Blob | Tex::Glass | Tex::Outside | Tex::Wall | Tex::Ceiling | Tex::Sky | Tex::Facade | Tex::Ground | Tex::Vista | Tex::VistaE | Tex::VistaD | Tex::VistaB) || v.iter().any(|x| x.color[3] < 255) {
                     continue;
                 }
                 draw_mesh(&Mesh { vertices: v.clone(), indices: idx.clone(), texture: None });
@@ -822,7 +828,7 @@ impl Renderer {
                 let i = self.batch_room(mt.t, verts.len(), idx.len());
                 let b = &mut self.batches[i];
                 let base = b.1.len() as u16;
-                let raw_uv = mt.tile >= 0.999 && (mt.emis || mt.t == Tex::Screen || mt.t == Tex::Desktop || mt.t.is_image());
+                let raw_uv = mt.tile >= 0.999 && (mt.emis || mt.t == Tex::Screen || mt.t == Tex::Desktop || mt.t == Tex::Label || mt.t.is_image());
                 for &(p, n, uv) in verts {
                     let wp = tr(p);
                     let ao = if mt.emis { 1.0 } else { (0.62 + wp.y * 0.9).min(1.0) };
@@ -847,7 +853,7 @@ impl Renderer {
             let mt = over.iter().find(|(k, _)| *k == part.material).map(|(_, x)| *x).unwrap_or(part.mt);
             let k = 1.0 / mt.tile.max(0.001);
             let w = if mt.emis { 2.0 } else { mt.spec };
-            let raw_uv = mt.tile >= 0.999 && (mt.emis || mt.t == Tex::Screen || mt.t == Tex::Desktop || mt.t.is_image());
+            let raw_uv = mt.tile >= 0.999 && (mt.emis || mt.t == Tex::Screen || mt.t == Tex::Desktop || mt.t == Tex::Label || mt.t.is_image());
             for (verts, idx) in &part.chunks {
                 let i = self.batch_room(mt.t, verts.len(), idx.len());
                 let b = &mut self.batches[i];
@@ -892,7 +898,7 @@ impl Renderer {
             let mt = over.iter().find(|(k, _)| *k == part.material).map(|(_, x)| *x).unwrap_or(part.mt);
             let k = 1.0 / mt.tile.max(0.001);
             let w = if mt.emis { 2.0 } else { mt.spec };
-            let raw_uv = mt.tile >= 0.999 && (mt.emis || mt.t == Tex::Screen || mt.t == Tex::Desktop || mt.t.is_image());
+            let raw_uv = mt.tile >= 0.999 && (mt.emis || mt.t == Tex::Screen || mt.t == Tex::Desktop || mt.t == Tex::Label || mt.t.is_image());
             let col = [(mt.c.r * 255.0) as u8, (mt.c.g * 255.0) as u8, (mt.c.b * 255.0) as u8, 255];
             for (verts, idx) in &part.chunks {
                 let i = match self.vm_batches.iter().position(|b| b.0 == mt.t && b.1.len() + verts.len() <= MAX_BATCH_VERTS && b.2.len() + idx.len() <= MAX_BATCH_INDICES) {

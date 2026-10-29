@@ -329,7 +329,7 @@ Usar: com a ferramenta certa na mão, mire o objeto e aperte E — o jogo faz a 
 Indicadores: com uma ferramenta na mão, um losango amarelo marca cada lugar onde ela serve agora
 Cabos: E numa ponta (ex.: a mídia) e depois E na outra (ex.: o bloqueador); a ponta que falta fica marcada em verde
 Examinar: F mostra o objeto de perto (o mouse gira, a roda aproxima) com o que está escrito nele; com as mãos livres, E também examina
-Objetivo: no tablet → Objeto, clique numa etapa para marcá-la; ela aparece no canto da tela e avança sozinha
+Tarefas: o painel semitransparente no canto mostra o objetivo e as etapas do objeto (O mostra/oculta); no tablet → Objeto, clique numa etapa para marcá-la como objetivo
 Tablet: T abre e fecha (Esc também fecha); o mouse fica livre no tablet, no quadro, no celular e na estação
 Estação pericial: com as mãos livres, aproxime-se do monitor e aperte E
 Terminal (oculto por padrão): F2, ' ou o botão Terminal na barra superior; Esc ou ✕ fecham; 'ajuda' lista os comandos

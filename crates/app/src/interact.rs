@@ -201,7 +201,8 @@ pub fn use_on(app: &mut App, pick: &str, ponto: Vec3) -> bool {
     }
     let all = all_steps(sim);
     let obj = app.objetivo.clone();
-    let Some((_owner, u)) = find_use(sim, &all, pick, hand, obj.as_ref()) else { return false };
+    let Some((owner, u)) = find_use(sim, &all, pick, hand, obj.as_ref()) else { return false };
+    app.foco_dono = Some(owner);
     match u {
         Uso::Fazer(st) => {
             if st.alvos.len() == 2 {
@@ -235,6 +236,10 @@ pub fn use_on(app: &mut App, pick: &str, ponto: Vec3) -> bool {
 // ------------------------------------------------------------------ exame
 
 pub fn start_exam(app: &mut App, id: &str, center: Vec3, half: Vec3, from: Vec3) {
+    if let Some(sim) = app.sim.as_ref() {
+        let all = all_steps(sim);
+        app.foco_dono = owner_of_pick(sim, &all, id).or(app.foco_dono.take());
+    }
     let d = (from - center).normalize_or_zero();
     let size = half.length().max(0.05);
     app.exam = Some(Exam { id: id.to_string(), center, half, yaw: d.x.atan2(d.z), pitch: d.y.asin().clamp(0.15, 1.2), dist: (size * 3.0).clamp(0.25, 1.6) });
@@ -489,19 +494,79 @@ pub fn advance_objective(app: &mut App, all: &[(String, Vec<Step>)]) {
     }
 }
 
-/// Faixa discreta no canto superior esquerdo da cena com o objetivo marcado.
-pub fn objective_hud(app: &mut App, view: Rect, all: &[(String, Vec<Step>)]) {
-    let Some(o) = app.objetivo.clone() else { return };
+/// Dono das etapas que um alvo mirado representa (o próprio objeto, ou o dono de uma parte/mídia).
+pub fn owner_of_pick(sim: &Sim, all: &[(String, Vec<Step>)], pick: &str) -> Option<String> {
+    if all.iter().any(|(o, _)| o == pick) {
+        return Some(pick.to_string());
+    }
+    all.iter().find(|(_, st)| st.iter().any(|x| !x.done && x.alvos.iter().any(|a| alvo_hit(sim, a, pick)))).map(|(o, _)| o.clone())
+}
+
+/// Painel semitransparente (canto superior esquerdo): objetivo marcado e as tarefas do objeto
+/// em foco — o marcado, ou o que está na mira, ou o último com que se mexeu, ou o primeiro com
+/// pendências. Tecla O mostra/oculta.
+pub fn tasks_panel(app: &mut App, view: Rect, all: &[(String, Vec<Step>)]) {
+    if !app.painel_tarefas {
+        return;
+    }
+    let Some(sim) = app.sim.as_ref() else { return };
     let s = app.ui.scale;
-    let tool = all.iter().find(|(ow, _)| ow == &o.owner).and_then(|(_, st)| st.iter().find(|x| x.cmd == o.cmd)).and_then(|x| x.tool);
-    let txt = format!("{} · {}{}", o.owner, o.label, tool.map(|t| format!(" — {}", tool_name(t))).unwrap_or_default());
-    let txt = crate::phone::clip_text(&app.ui, &txt, 12.0, F::Reg, view.w * 0.45);
-    let w = app.ui.measure(&txt, 12.0, F::Reg) + 96.0 * s;
-    let r = rect(view.x + 12.0 * s, view.y + 10.0 * s, w, 24.0 * s);
-    draw_rectangle(r.x, r.y, r.w, r.h, Color::new(0.02, 0.03, 0.05, 0.55));
-    draw_rectangle(r.x, r.y, 3.0 * s, r.h, Color::new(0.45, 0.75, 1.0, 0.9));
-    app.ui.text("OBJETIVO", r.x + 10.0 * s, r.y + 16.5 * s, 10.0, F::Bold, Color::new(0.55, 0.8, 1.0, 1.0));
-    app.ui.text(&txt, r.x + 80.0 * s, r.y + 16.5 * s, 12.0, F::Reg, T.text);
+    let mira = app.hover_pick.as_ref().and_then(|p| owner_of_pick(sim, all, p));
+    let dono = app.objetivo.as_ref().map(|o| o.owner.clone()).or(mira).or(app.foco_dono.clone()).filter(|d| all.iter().any(|(o, _)| o == d)).or_else(|| all.iter().find(|(_, st)| steps::next_required(st).is_some()).map(|(o, _)| o.clone()));
+    let Some(dono) = dono else { return };
+    let Some((_, st)) = all.iter().find(|(o, _)| *o == dono) else { return };
+    let nome = sim.case.item(&dono).map(|it| it.label.clone()).or_else(|| sim.case.vestigios.iter().find(|v| v.id == dono).map(|v| v.label.clone())).unwrap_or_default();
+    let feitas = st.iter().filter(|x| x.done).count();
+    let prox = st.iter().position(|x| !x.done && !x.optional).or_else(|| st.iter().position(|x| !x.done));
+    // janela de até 7 linhas em torno da próxima etapa
+    let n = st.len();
+    let ini = prox.unwrap_or(n.saturating_sub(1)).saturating_sub(2).min(n.saturating_sub(7));
+    let fim = (ini + 7).min(n);
+    let w = (330.0 * s).min(view.w * 0.42);
+    let lh = 17.0 * s;
+    let obj_h = if app.objetivo.is_some() { 20.0 * s } else { 0.0 };
+    let h = 40.0 * s + obj_h + (fim - ini) as f32 * lh + 22.0 * s;
+    let r = rect(view.x + 12.0 * s, view.y + 10.0 * s, w, h);
+    draw_rectangle(r.x, r.y, r.w, r.h, Color::new(0.02, 0.03, 0.05, 0.42));
+    draw_rectangle(r.x, r.y, 3.0 * s, r.h, Color::new(0.45, 0.75, 1.0, 0.8));
+    let lw = w - 20.0 * s;
+    let titulo = crate::phone::clip_text(&app.ui, &format!("{} · {}", dono, nome), 12.5, F::Bold, lw - 60.0 * s);
+    app.ui.text(&titulo, r.x + 10.0 * s, r.y + 17.0 * s, 12.5, F::Bold, T.text);
+    let cont = format!("{}/{}", feitas, n);
+    let cw = app.ui.measure(&cont, 11.0, F::Reg);
+    app.ui.text(&cont, r.x + w - cw - 10.0 * s, r.y + 17.0 * s, 11.0, F::Reg, T.dim);
+    let mut y = r.y + 34.0 * s;
+    if let Some(o) = app.objetivo.as_ref() {
+        let t = crate::phone::clip_text(&app.ui, &format!("◆ Objetivo: {}", o.label), 11.5, F::Bold, lw);
+        app.ui.text(&t, r.x + 10.0 * s, y + 2.0 * s, 11.5, F::Bold, Color::new(0.55, 0.8, 1.0, 1.0));
+        y += obj_h;
+    }
+    if ini > 0 {
+        app.ui.text(&format!("✔ {} anteriores", ini), r.x + 10.0 * s, y - 3.0 * s, 9.5, F::Reg, T.dim);
+    }
+    for (i, x) in st.iter().enumerate().take(fim).skip(ini) {
+        y += lh;
+        let marcado = app.objetivo.as_ref().map(|o| o.owner == dono && o.cmd == x.cmd).unwrap_or(false);
+        let (ic, col) = if x.done {
+            ("✔", Color::new(0.55, 0.62, 0.58, 0.9))
+        } else if marcado {
+            ("◆", Color::new(0.55, 0.8, 1.0, 1.0))
+        } else if Some(i) == prox {
+            ("▸", T.highlight)
+        } else {
+            ("○", Color::new(0.75, 0.78, 0.82, 0.85))
+        };
+        app.ui.text(ic, r.x + 10.0 * s, y, 11.0, F::Bold, col);
+        let ferr = x.tool.map(tool_name).unwrap_or("mãos");
+        let ferr = crate::phone::clip_text(&app.ui, ferr, 10.0, F::Reg, lw * 0.36);
+        let fw = app.ui.measure(&ferr, 10.0, F::Reg);
+        let lbl = format!("{}{}", x.label, if x.optional { " (opcional)" } else { "" });
+        let lbl = crate::phone::clip_text(&app.ui, &lbl, 11.5, F::Reg, lw - fw - 30.0 * s);
+        let tc = if x.done { Color::new(0.6, 0.65, 0.62, 0.85) } else if Some(i) == prox { T.text } else { Color::new(0.85, 0.87, 0.9, 0.9) };
+        app.ui.text(&lbl, r.x + 26.0 * s, y, 11.5, F::Reg, tc);
+        app.ui.text(&ferr, r.x + w - fw - 10.0 * s, y, 10.0, F::Reg, T.dim);
+    }
+    app.ui.text("O: ocultar · tablet → Objeto: marcar objetivo", r.x + 10.0 * s, r.y + r.h - 7.0 * s, 9.5, F::Reg, T.dim);
 }
 
 /// Texto da dica de mira para um alvo.
