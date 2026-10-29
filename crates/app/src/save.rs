@@ -190,29 +190,98 @@ pub fn export(sim: &Sim) -> Result<(PathBuf, PathBuf), String> {
     Ok((pdf, md))
 }
 
+#[derive(Clone, Debug, PartialEq)]
 pub struct Settings {
     pub ui_scale: f32,
     pub render3d: bool,
     pub low_power: bool,
     pub shadows: bool,
+    // áudio (0–1)
+    pub vol_master: f32,
+    pub vol_ambient: f32,
+    pub vol_effects: f32,
+    pub vol_ui: f32,
+    pub muted: bool,
+    pub footsteps: bool,
+    // controles
+    pub mouse_sens: f32,
+    pub invert_y: bool,
+    pub fov_deg: f32,
+    // interface
+    pub show_hints: bool,
+    pub held_tablet: bool,
+}
+
+impl Default for Settings {
+    fn default() -> Self {
+        Settings {
+            ui_scale: 1.0,
+            render3d: true,
+            low_power: true,
+            shadows: true,
+            vol_master: 0.8,
+            vol_ambient: 0.55,
+            vol_effects: 0.9,
+            vol_ui: 0.6,
+            muted: false,
+            footsteps: true,
+            mouse_sens: 1.0,
+            invert_y: false,
+            fov_deg: 70.0,
+            show_hints: true,
+            held_tablet: true,
+        }
+    }
+}
+
+impl Settings {
+    pub fn volumes(&self) -> crate::audio::Volumes {
+        crate::audio::Volumes { master: self.vol_master, cat: [self.vol_ambient, self.vol_effects, self.vol_ui], muted: self.muted }
+    }
+    pub fn to_json(&self) -> String {
+        json!({
+            "ui_scale": self.ui_scale, "render3d": self.render3d, "low_power": self.low_power, "shadows": self.shadows,
+            "vol_master": self.vol_master, "vol_ambient": self.vol_ambient, "vol_effects": self.vol_effects, "vol_ui": self.vol_ui,
+            "muted": self.muted, "footsteps": self.footsteps,
+            "mouse_sens": self.mouse_sens, "invert_y": self.invert_y, "fov_deg": self.fov_deg,
+            "show_hints": self.show_hints, "held_tablet": self.held_tablet,
+        })
+        .to_string()
+    }
+    /// Lê as configurações; campos ausentes ou fora da faixa voltam ao padrão.
+    pub fn from_json(s: &str) -> Settings {
+        let d = Settings::default();
+        let Ok(v) = serde_json::from_str::<Value>(s) else { return d };
+        let f = |k: &str, def: f32, lo: f32, hi: f32| v[k].as_f64().map(|x| (x as f32).clamp(lo, hi)).unwrap_or(def);
+        let b = |k: &str, def: bool| v[k].as_bool().unwrap_or(def);
+        Settings {
+            ui_scale: f("ui_scale", d.ui_scale, 0.7, 1.8),
+            render3d: b("render3d", d.render3d),
+            low_power: b("low_power", d.low_power),
+            shadows: b("shadows", d.shadows),
+            vol_master: f("vol_master", d.vol_master, 0.0, 1.0),
+            vol_ambient: f("vol_ambient", d.vol_ambient, 0.0, 1.0),
+            vol_effects: f("vol_effects", d.vol_effects, 0.0, 1.0),
+            vol_ui: f("vol_ui", d.vol_ui, 0.0, 1.0),
+            muted: b("muted", d.muted),
+            footsteps: b("footsteps", d.footsteps),
+            mouse_sens: f("mouse_sens", d.mouse_sens, 0.2, 3.0),
+            invert_y: b("invert_y", d.invert_y),
+            fov_deg: f("fov_deg", d.fov_deg, 55.0, 95.0),
+            show_hints: b("show_hints", d.show_hints),
+            held_tablet: b("held_tablet", d.held_tablet),
+        }
+    }
 }
 
 pub fn load_settings() -> Settings {
-    let d = Settings { ui_scale: 1.0, render3d: true, low_power: true, shadows: true };
-    let Ok(s) = std::fs::read_to_string(data_dir().join("config.json")) else { return d };
-    let Ok(v) = serde_json::from_str::<Value>(&s) else { return d };
-    Settings {
-        ui_scale: v["ui_scale"].as_f64().unwrap_or(1.0) as f32,
-        render3d: v["render3d"].as_bool().unwrap_or(true),
-        low_power: v["low_power"].as_bool().unwrap_or(true),
-        shadows: v["shadows"].as_bool().unwrap_or(true),
-    }
+    std::fs::read_to_string(data_dir().join("config.json")).map(|s| Settings::from_json(&s)).unwrap_or_default()
 }
 
 pub fn save_settings(s: &Settings) {
     let dir = data_dir();
     ensure(&dir);
-    let _ = std::fs::write(dir.join("config.json"), json!({"ui_scale": s.ui_scale, "render3d": s.render3d, "low_power": s.low_power, "shadows": s.shadows}).to_string());
+    let _ = write_atomic(&dir.join("config.json"), s.to_json().as_bytes());
 }
 
 /// Desfaz o escape usado no log de replay (\\ → \, \n → quebra de linha).
@@ -235,6 +304,24 @@ pub fn unescape(s: &str) -> String {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn configuracoes_ida_e_volta_e_faixas() {
+        use super::Settings;
+        let mut c = Settings::default();
+        c.vol_effects = 0.25;
+        c.invert_y = true;
+        c.fov_deg = 80.0;
+        assert_eq!(Settings::from_json(&c.to_json()), c);
+        // arquivo antigo (só os 4 campos da v0.6) mantém o resto no padrão
+        let old = Settings::from_json(r#"{"ui_scale":1.2,"render3d":true,"low_power":false,"shadows":false}"#);
+        assert_eq!(old.ui_scale, 1.2);
+        assert!(!old.shadows && old.vol_master == Settings::default().vol_master);
+        // valores absurdos são limitados
+        let bad = Settings::from_json(r#"{"vol_master":7,"fov_deg":400,"mouse_sens":-1}"#);
+        assert_eq!((bad.vol_master, bad.fov_deg, bad.mouse_sens), (1.0, 95.0, 0.2));
+        assert_eq!(Settings::from_json("lixo"), Settings::default());
+    }
+
     #[test]
     fn replay_com_terminal_linux_reproduz_a_auditoria() {
         use pericia_core::casegen::generate;

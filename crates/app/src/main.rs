@@ -10,6 +10,10 @@ mod fps;
 mod phone;
 mod render;
 mod tablet;
+mod audio;
+mod config;
+mod sfx;
+mod video;
 mod world;
 mod ui;
 
@@ -93,6 +97,14 @@ pub struct App {
     pub phone: phone::PhoneUi,
     /// Tablet do perito (missão, objeto, apoio, anotações) — tecla T na área de hardware.
     pub tablet: tablet::TabletUi,
+    pub audio: audio::Audio,
+    /// Ouvinte (posição da câmera, vetor à direita) para os sons posicionados.
+    pub ear: (Vec3, Vec3),
+    /// Posição no mundo de cada item visível (atualizada a cada quadro da cena 3D).
+    pub item_pos: std::collections::HashMap<String, Vec3>,
+    pub step_n: u32,
+    pub key_n: u32,
+    pub config: config::ConfigUi,
     /// Legenda exibida em roteiros de demonstração (gravação de vídeo).
     pub caption: Option<String>,
 }
@@ -106,6 +118,7 @@ impl App {
         self.term.lines.push_str(&format!("\n> {}\n{}\n", cmd, if out.ok { out.text.clone() } else { format!("ERRO: {}", out.text) }));
         self.term.scroll = f32::MAX;
         let _ = save::save_current(self.sim.as_ref().unwrap(), &self.cmdlog);
+        sfx::command(self, cmd, out.ok);
         if out.ok { out.text } else { format!("ERRO: {}", out.text) }
     }
     /// Como `run`, mas sem ecoar a saída completa no terminal (edições do documento).
@@ -338,34 +351,20 @@ fn draw_menu(app: &mut App) {
     y += 20.0 * s;
     app.ui.text("Configurações", col2.x + 16.0 * s, y, 14.0, F::Bold, T.text);
     y += 14.0 * s;
-    let r3d = rect(col2.x + 16.0 * s, y, col2.w - 32.0 * s, 30.0 * s);
-    if app.ui.button(r3d, &format!("Cena 3D: {}", if app.settings.render3d { "ativada" } else { "desativada (modo 2D leve)" })) {
-        app.settings.render3d = !app.settings.render3d;
-        save::save_settings(&app.settings);
+    let st = &app.settings;
+    let resumo = format!(
+        "Som {} · cena {} · sombras {} · escala {:.0}%",
+        if st.muted { "silenciado".to_string() } else { format!("{:.0}%", st.vol_master * 100.0) },
+        if st.render3d { "3D" } else { "2D" },
+        if st.shadows { "ativadas" } else { "desativadas" },
+        st.ui_scale * 100.0
+    );
+    app.ui.text(&resumo, col2.x + 16.0 * s, y + 18.0 * s, 11.5, F::Reg, T.dim);
+    y += 28.0 * s;
+    if app.ui.button(rect(col2.x + 16.0 * s, y, col2.w - 32.0 * s, 32.0 * s), "⚙  Abrir configurações (áudio, gráficos, controles, interface)") {
+        config::open(app);
     }
-    y += 36.0 * s;
-    let rlp = rect(col2.x + 16.0 * s, y, col2.w - 32.0 * s, 30.0 * s);
-    if app.ui.button(rlp, &format!("Economia de energia: {}", if app.settings.low_power { "ativada (redesenha só quando necessário)" } else { "desativada" })) {
-        app.settings.low_power = !app.settings.low_power;
-        save::save_settings(&app.settings);
-    }
-    y += 36.0 * s;
-    let rsh = rect(col2.x + 16.0 * s, y, col2.w - 32.0 * s, 30.0 * s);
-    if app.ui.button(rsh, &format!("Sombras: {}", if app.settings.shadows { "ativadas" } else { "desativadas (mais leve)" })) {
-        app.settings.shadows = !app.settings.shadows;
-        save::save_settings(&app.settings);
-    }
-    y += 36.0 * s;
-    app.ui.text(&format!("Escala da interface: {:.0}%", app.settings.ui_scale * 100.0), col2.x + 16.0 * s, y + 20.0 * s, 12.5, F::Reg, T.text);
-    if app.ui.button(rect(col2.x + col2.w - 110.0 * s, y, 44.0 * s, 30.0 * s), "−") {
-        app.settings.ui_scale = (app.settings.ui_scale - 0.1).max(0.7);
-        save::save_settings(&app.settings);
-    }
-    if app.ui.button(rect(col2.x + col2.w - 60.0 * s, y, 44.0 * s, 30.0 * s), "+") {
-        app.settings.ui_scale = (app.settings.ui_scale + 0.1).min(1.8);
-        save::save_settings(&app.settings);
-    }
-    y += 50.0 * s;
+    y += 40.0 * s;
     let howto = "Como jogar\n• Área de Hardware: gire a câmera com o botão direito, aproxime com a roda e clique nos equipamentos. Cada ação física vira um comando no terminal.\n• Estação Pericial: clique no PC ao fundo ou na aba superior. No PeritOS você examina as imagens, navega na rede emulada e redige o documento.\n• Encontrar a expressão-alvo não basta: procedimento, preservação e fundamentação são avaliados.";
     let lines = app.ui.wrap(howto, 11.5, F::Reg, col2.w - 32.0 * s);
     for l in lines {
@@ -403,7 +402,7 @@ fn top_bar(app: &mut App) -> f32 {
         app.area = Area::Station;
     }
     let mut x = w - 8.0 * s;
-    for (label, act) in [("Menu", 0), ("Terminal", 1)] {
+    for (label, act) in [("Menu", 0), ("Terminal", 1), ("⚙ Configurações", 2)] {
         let bw = app.ui.measure(label, 13.0, F::Reg) + 24.0 * s;
         x -= bw + 4.0 * s;
         if app.ui.button(rect(x, 6.0 * s, bw, h - 12.0 * s), label) {
@@ -413,7 +412,8 @@ fn top_bar(app: &mut App) -> f32 {
                     app.screen = Screen::Menu;
                     app.history = save::history();
                 }
-                _ => app.term_open = !app.term_open,
+                1 => app.term_open = !app.term_open,
+                _ => config::open(app),
             }
         }
     }
@@ -500,6 +500,11 @@ fn item_actions(sim: &Sim, it: &Item) -> Vec<(String, String, bool)> {
 }
 
 fn hardware(app: &mut App, area: Rect) {
+    if app.config.open {
+        // configurações abertas: a cena segue desenhada, sem receber entrada nem teclas
+        hardware_inner(app, area, true);
+        return;
+    }
     let typing = matches!(app.ui.focus.as_deref(), Some("term") | Some("pin") | Some("seed"));
     if tablet::keys(app, typing) {
         // tablet em mãos: a cena segue desenhada (sem o tablet 3D), sem receber entrada
@@ -579,8 +584,15 @@ fn hardware_inner(app: &mut App, area: Rect, modal: bool) {
         fog: vec3(0.55, 0.57, 0.60),
         fog_den: 0.018,
     };
-    if !app.tablet.open && app.phone.open.is_none() {
+    if !app.tablet.open && app.phone.open.is_none() && app.settings.held_tablet {
         held_tablet(&mut r, &cam);
+    }
+    // ouvinte e posições dos objetos para o som 3D
+    let right = (cam.target - cam.position).cross(vec3(0.0, 1.0, 0.0)).normalize_or_zero();
+    app.ear = (cam.position, right);
+    app.item_pos.clear();
+    for p in &wrld.picks {
+        app.item_pos.insert(p.id.clone(), p.center);
     }
     r.shadows = app.settings.shadows;
     r.flush(&lights, &c);
@@ -591,8 +603,14 @@ fn hardware_inner(app: &mut App, area: Rect, modal: bool) {
         app.player.case = case_id;
         app.player.place(wrld.start.0, wrld.start.1);
     }
+    app.player.sens = app.settings.mouse_sens;
+    app.player.invert_y = app.settings.invert_y;
+    app.player.fov = app.settings.fov_deg.to_radians();
     if app.player.update(&wrld, !typing, !modal && view.contains(app.ui.mouse)) {
         app.ui.any_input = true;
+    }
+    if let Some(run) = app.player.step.take() {
+        sfx::footstep(app, run);
     }
     if !typing && is_key_pressed(KeyCode::Tab) {
         let c = !app.player.captured;
@@ -674,12 +692,14 @@ fn hardware_inner(app: &mut App, area: Rect, modal: bool) {
     if clicked || pressed_e {
         match best.filter(|(t, _)| *t <= REACH).map(|(_, i)| wrld.picks[i].clone()) {
             Some(p) if p.id == "STATION" => {
+                app.audio.play("cadeira", audio::Cat::Efeitos, 0.9);
                 app.player.set_captured(false);
                 app.area = Area::Station;
                 app.station_zoom = true;
                 app.toast("Você se sentou na estação pericial.");
             }
             Some(p) if p.id.starts_with("ITEM") => {
+                sfx::interact(app, &p.id, p.center);
                 app.selected = Some(p.id.clone());
                 app.panel_scroll = 0.0;
                 if app.player.captured {
@@ -692,6 +712,7 @@ fn hardware_inner(app: &mut App, area: Rect, modal: bool) {
                     "TOOL-CAM" => "Câmera: fixação fotográfica antes de qualquer intervenção ('Fotografar').",
                     _ => "Embalagens antiestáticas, Faraday bag, papel-alumínio e fita de lacre numerada.",
                 };
+                sfx::interact(app, &p.id, p.center);
                 app.toast(info);
             }
             None if clicked && !app.player.captured => {
@@ -701,7 +722,7 @@ fn hardware_inner(app: &mut App, area: Rect, modal: bool) {
         }
     }
     // dica discreta (controles completos: tablet → Apoio → Controles)
-    if !modal {
+    if !modal && app.settings.show_hints {
         hint_chips(app, view);
     }
     if show_panel {
@@ -868,6 +889,7 @@ fn station(app: &mut App, area: Rect) {
     }
     let r = rect(area.x + area.w - 170.0 * s, area.y + area.h - 30.0 * s, 164.0 * s, 24.0 * s);
     if app.ui.button(r, "◄ Levantar da estação") {
+        app.audio.play("cadeira", audio::Cat::Efeitos, 0.8);
         linuxde::capture(app, area);
         desktop::sync_laudo(app);
         app.area = Area::Hardware;
@@ -878,6 +900,16 @@ fn station(app: &mut App, area: Rect) {
 
 fn game(app: &mut App) {
     clear_background(T.bg);
+    // Esc no ambiente: fecha o painel do objeto; sem nada aberto, abre as configurações
+    if app.ui.key_esc && app.area == Area::Hardware && !app.config.open && !app.tablet.open && app.phone.open.is_none() && !app.player.captured && app.ui.focus.is_none() {
+        app.ui.key_esc = false;
+        if app.selected.is_some() || app.show_help_overlay {
+            app.selected = None;
+            app.show_help_overlay = false;
+        } else {
+            config::open(app);
+        }
+    }
     let top = top_bar(app);
     let s = app.ui.scale;
     // na área de trabalho Linux o terminal do simulador fica oculto (o Linux tem o seu)
@@ -915,6 +947,8 @@ struct Script {
     pending: Option<String>,
     /// Movimento suave do jogador: (origem, destino, yaw0, yaw1, pitch0, pitch1, total, feito).
     anim: Option<(Vec3, Vec3, f32, f32, f32, f32, u32, u32)>,
+    /// Distância andada desde o último passo (som dos passos nas caminhadas do roteiro).
+    walk_acc: f32,
 }
 
 /// Legenda de demonstração: faixa escura com o texto, na parte inferior central.
@@ -936,7 +970,13 @@ fn run_script(app: &mut App, sc: &mut Script) -> bool {
     if let Some((p0, p1, y0, y1, a0, a1, n, k)) = sc.anim {
         let t = (k + 1) as f32 / n as f32;
         let e = t * t * (3.0 - 2.0 * t); // suavização
-        app.player.pos = p0.lerp(p1, e);
+        let np = p0.lerp(p1, e);
+        sc.walk_acc += (np - app.player.pos).length();
+        if sc.walk_acc > 0.72 {
+            sc.walk_acc -= 0.72;
+            sfx::footstep(app, false);
+        }
+        app.player.pos = np;
         app.player.yaw = y0 + (y1 - y0) * e;
         app.player.pitch = a0 + (a1 - a0) * e;
         sc.anim = if k + 1 >= n { None } else { Some((p0, p1, y0, y1, a0, a1, n, k + 1)) };
@@ -1130,6 +1170,27 @@ fn run_script(app: &mut App, sc: &mut Script) -> bool {
         }
         "tndel" => app.tablet.delete(arg.parse().unwrap_or(0)),
         "resume" => app.resume(),
+        "config" => match arg.as_str() {
+            "off" => config::close(app),
+            t => {
+                app.config.tab = t.parse().unwrap_or(0);
+                config::open(app);
+            }
+        },
+        "press" => {
+            // simula uma interação: "press <id do pick>" (item ou ferramenta) — som de tocar o objeto
+            let id = arg.to_uppercase();
+            if id == "STATION" {
+                app.audio.play("cadeira", audio::Cat::Efeitos, 0.9);
+                app.area = Area::Station;
+                app.station_zoom = true;
+            } else if let Some(p) = app.item_pos.get(&id).copied() {
+                sfx::interact(app, &id, p);
+                if id.starts_with("ITEM") {
+                    app.selected = Some(id);
+                }
+            }
+        }
         "menu" => {
             app.screen = Screen::Menu;
             app.history = save::history();
@@ -1150,6 +1211,7 @@ fn run_script(app: &mut App, sc: &mut Script) -> bool {
 async fn main() {
     let fonts = Fonts::load();
     let settings = save::load_settings();
+    let vols = settings.volumes();
     let mut app = App {
         ui: Ui::new(fonts),
         screen: Screen::Menu,
@@ -1178,6 +1240,12 @@ async fn main() {
         show_help_overlay: false,
         phone: phone::PhoneUi::default(),
         tablet: tablet::TabletUi::default(),
+        audio: audio::Audio::new(vols),
+        ear: (Vec3::ZERO, Vec3::X),
+        item_pos: Default::default(),
+        step_n: 0,
+        key_n: 0,
+        config: config::ConfigUi::default(),
         caption: None,
         de: linuxde::LinuxDe::new(),
     };
@@ -1189,22 +1257,36 @@ async fn main() {
         dir: std::env::var("PERICIA_SHOTS").unwrap_or_else(|_| ".".into()),
         pending: None,
         anim: None,
+        walk_acc: 0.0,
     });
     // gravação de vídeo de roteiro: limita a 30 quadros/s para que o tempo seja real
     let realtime = std::env::var("PERICIA_REALTIME").is_ok();
     let mut shot_n = 0;
     let mut idle_frames = 0u32;
     let mut perf_log: Vec<f32> = vec![];
+    // vídeo de demonstração quadro a quadro (30 q/s), com o áudio mixado em sincronia
+    let mut video = std::env::var("PERICIA_VIDEO").ok().and_then(|path| video::Pipe::open(&path, screen_width() as u32, screen_height() as u32));
     loop {
         let t0 = std::time::Instant::now();
         let scale = app.settings.ui_scale;
         app.ui.begin(scale);
+        let held = if app.config.open { Some(app.ui.hold()) } else { None };
         match app.screen {
             Screen::Menu => draw_menu(&mut app),
             Screen::Game => game(&mut app),
         }
+        if let Some(h) = held {
+            app.ui.release(h);
+            config::draw(&mut app);
+        }
+        app.audio.set_volumes(app.settings.volumes());
+        sfx::update(&mut app);
         if let Some(c) = app.caption.clone() {
             draw_caption(&mut app, &c);
+        }
+        if let Some(v) = video.as_mut() {
+            v.frame(&get_screen_data().bytes);
+            app.audio.tick(1.0 / 30.0);
         }
         perf_log.push(t0.elapsed().as_secs_f32() * 1000.0);
         if realtime {
@@ -1226,6 +1308,10 @@ async fn main() {
                 }
             }
             if !run_script(&mut app, sc) {
+                app.audio.finish();
+                if let Some(v) = video.take() {
+                    v.close();
+                }
                 let avg = perf_log.iter().sum::<f32>() / perf_log.len().max(1) as f32;
                 let mut sorted = perf_log.clone();
                 sorted.sort_by(|a, b| a.partial_cmp(b).unwrap());

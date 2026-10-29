@@ -89,6 +89,20 @@ pub struct Ui {
     pub key_end: bool,
     pub key_del: bool,
     nav_repeat: f32,
+    /// Cliques em botões/abas neste quadro (o desenho de som toca o clique).
+    pub clicks: u32,
+    /// Controle deslizante sendo arrastado.
+    pub drag: Option<String>,
+}
+
+/// Entrada do quadro guardada enquanto um modal bloqueia o que está por trás.
+pub struct Held {
+    clicked: bool,
+    wheel: f32,
+    chars: Vec<char>,
+    keys: [bool; 12],
+    paste: Option<String>,
+    focus: Option<String>,
 }
 
 impl Ui {
@@ -121,6 +135,8 @@ impl Ui {
             key_end: false,
             key_del: false,
             nav_repeat: 0.0,
+            clicks: 0,
+            drag: None,
         }
     }
 
@@ -261,7 +277,11 @@ impl Ui {
         }
         let w = self.measure(&l, size, F::Reg);
         self.text(&l, r.x + (r.w - w) / 2.0, r.y + r.h / 2.0 + self.s(5.0), size, F::Reg, if enabled { T.text } else { T.dim });
-        enabled && self.click_in(r)
+        let c = enabled && self.click_in(r);
+        if c {
+            self.clicks += 1;
+        }
+        c
     }
 
     pub fn tab(&mut self, r: Rect, label: &str, active: bool) -> bool {
@@ -269,7 +289,102 @@ impl Ui {
         self.frame(r, fill, if active { T.accent } else { T.border });
         let w = self.measure(label, 13.0, F::Bold);
         self.text(label, r.x + (r.w - w) / 2.0, r.y + r.h / 2.0 + self.s(5.0), 13.0, F::Bold, T.text);
-        self.click_in(r)
+        let c = self.click_in(r);
+        if c {
+            self.clicks += 1;
+        }
+        c
+    }
+
+    /// Bloqueia a entrada deste quadro para o que é desenhado por trás de um modal.
+    pub fn hold(&mut self) -> Held {
+        let h = Held {
+            clicked: self.clicked && !self.click_consumed,
+            wheel: self.wheel,
+            chars: std::mem::take(&mut self.chars),
+            keys: [self.key_enter, self.key_back, self.key_up, self.key_down, self.key_tab, self.key_esc, self.key_left, self.key_right, self.key_home, self.key_end, self.key_del, self.ctrl],
+            paste: self.paste.take(),
+            focus: self.focus.take(),
+        };
+        self.click_consumed = true;
+        self.wheel = 0.0;
+        self.key_enter = false;
+        self.key_back = false;
+        self.key_up = false;
+        self.key_down = false;
+        self.key_tab = false;
+        self.key_esc = false;
+        self.key_left = false;
+        self.key_right = false;
+        self.key_home = false;
+        self.key_end = false;
+        self.key_del = false;
+        h
+    }
+
+    /// Devolve a entrada guardada por `hold` (para o próprio modal usar).
+    pub fn release(&mut self, h: Held) {
+        self.click_consumed = !h.clicked;
+        self.wheel = h.wheel;
+        self.chars = h.chars;
+        [self.key_enter, self.key_back, self.key_up, self.key_down, self.key_tab, self.key_esc, self.key_left, self.key_right, self.key_home, self.key_end, self.key_del, self.ctrl] = h.keys;
+        self.paste = h.paste;
+        self.focus = h.focus;
+        self.tooltip = None;
+    }
+
+    /// Controle deslizante; devolve true enquanto o valor muda.
+    pub fn slider(&mut self, id: &str, r: Rect, v: &mut f32, lo: f32, hi: f32) -> bool {
+        let hit = rect(r.x - self.s(6.0), r.y - self.s(6.0), r.w + self.s(12.0), r.h + self.s(12.0));
+        if self.click_in(hit) {
+            self.drag = Some(id.to_string());
+        }
+        let mut changed = false;
+        if self.drag.as_deref() == Some(id) {
+            if is_mouse_button_down(MouseButton::Left) {
+                let nv = (lo + ((self.mouse.x - r.x) / r.w).clamp(0.0, 1.0) * (hi - lo)).clamp(lo, hi);
+                if (nv - *v).abs() > 1e-6 {
+                    *v = nv;
+                    changed = true;
+                }
+                self.any_input = true;
+            } else {
+                self.drag = None;
+            }
+        }
+        if self.hover(hit) && self.wheel != 0.0 {
+            *v = (*v + self.wheel.signum() * (hi - lo) * 0.05).clamp(lo, hi);
+            self.wheel = 0.0;
+            changed = true;
+        }
+        let u = ((*v - lo) / (hi - lo)).clamp(0.0, 1.0);
+        let ty = r.y + r.h / 2.0;
+        draw_rectangle(r.x, ty - self.s(3.0), r.w, self.s(6.0), T.term_bg);
+        draw_rectangle(r.x, ty - self.s(3.0), r.w * u, self.s(6.0), T.accent2);
+        let kx = r.x + r.w * u;
+        let active = self.drag.as_deref() == Some(id) || self.hover(hit);
+        draw_circle(kx, ty, self.s(if active { 9.0 } else { 8.0 }), if active { T.accent } else { T.text });
+        changed
+    }
+
+    /// Interruptor liga/desliga com rótulo à esquerda; devolve true se mudou.
+    pub fn toggle(&mut self, r: Rect, label: &str, v: &mut bool) -> bool {
+        let hov = self.hover(r);
+        if hov {
+            draw_rectangle(r.x, r.y, r.w, r.h, Color::new(1.0, 1.0, 1.0, 0.04));
+        }
+        self.text(label, r.x + self.s(6.0), r.y + r.h / 2.0 + self.s(5.0), 13.0, F::Reg, T.text);
+        let sw = rect(r.x + r.w - self.s(52.0), r.y + r.h / 2.0 - self.s(11.0), self.s(46.0), self.s(22.0));
+        draw_rectangle(sw.x, sw.y, sw.w, sw.h, if *v { T.accent2 } else { T.term_bg });
+        draw_rectangle_lines(sw.x, sw.y, sw.w, sw.h, 1.0, if hov { T.accent } else { T.border });
+        let kx = if *v { sw.x + sw.w - sw.h / 2.0 } else { sw.x + sw.h / 2.0 };
+        draw_circle(kx, sw.y + sw.h / 2.0, sw.h / 2.0 - self.s(3.0), T.text);
+        if self.click_in(r) {
+            *v = !*v;
+            self.clicks += 1;
+            return true;
+        }
+        false
     }
 
     /// Campo de texto de uma linha. Retorna true quando Enter é pressionado com foco.

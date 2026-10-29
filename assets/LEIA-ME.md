@@ -83,3 +83,18 @@ Arquivos **OBJ/MTL** em `assets/models/` são lidos e validados na inicializaç�
 glTF/GLB, FBX, COLLADA e .blend: o inventário os descreve, mas carregar exige conversão para OBJ ou uma dependência nova (leitor glTF). Essa escolha será feita quando os arquivos chegarem, pela alternativa menos invasiva.
 
 A cena usa **metros**, Y para cima. A malha do macroquad usa índices de 16 bits: modelos com mais de 65 535 vértices precisam ser divididos.
+
+## Sons (`sounds/`)
+
+50 arquivos WAV (PCM 16 bits, 44,1 kHz; efeitos em mono, ambientes em estéreo e em loop sem emenda), gerados por `tools/audio/gerar_sons.py` com sementes fixas — rodar de novo produz os mesmos arquivos. Nenhuma gravação de terceiros: tudo é síntese (ruído filtrado, modos amortecidos, varreduras e uma sala curta sintética). Os efeitos são normalizados pela intensidade percebida (RMS dos trechos ativos, −21 dBFS) com teto de pico, para que um clique e um papel amassado soem com volume parecido.
+
+| Grupo | Arquivos |
+|---|---|
+| Ambientes (loop) | `ambiente_laboratorio` (24 s), `ambiente_escritorio` (30 s), `ambiente_estacao` (6 s, ventoinha do computador) |
+| Tablet | `tablet_sacar`, `tablet_guardar`, `tablet_toque`, `nota_gravada` |
+| Interface | `ui_clique`, `ui_erro`, `aviso`, `tecla_1..3` |
+| Passos e corpo | `passo_vinil_1..4`, `passo_madeira_1..4`, `cadeira` |
+| Tocar objetos | `interagir_gabinete`, `interagir_notebook`, `interagir_celular`, `interagir_midia`, `interagir_ferramenta` |
+| Ações periciais | `foto`, `papel`, `deslacrar`, `lacre_aplicar`, `abrir_gabinete`, `componente_remover`, `midia_remover`, `bloqueio`, `aquisicao`, `hash`, `energia_desligar`, `rede_isolar`, `digitacao`, `faraday`, `aluminio`, `celular_toque`, `celular_carregar`, `sim_remover`, `extracao`, `embalar`, `etiquetar`, `inspecionar`, `caneta` |
+
+Um WAV com o mesmo nome substitui o som gerado (16 bits, mono ou estéreo; outras taxas são reamostradas). Sem a pasta, o jogo roda em silêncio.

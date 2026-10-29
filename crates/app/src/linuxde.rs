@@ -783,6 +783,7 @@ pub fn exec_line(app: &mut App, t: usize, line: &str) {
     term.buf.push_str(&format!("{}{}\n", prompt, line));
     let cwd = term.sh.cwd.clone();
     let out = run_line(os, sim, &mut term.sh, line);
+    let code_ok = term.sh.last_code == 0;
     if !line.trim().is_empty() {
         sim.os_shell_audit(line.trim(), if term.sh.last_code == 0 { "ok" } else { "código de saída diferente de zero" });
         cmdlog.push(format!("\u{1}sh {}\t{}", cwd, line));
@@ -811,6 +812,10 @@ pub fn exec_line(app: &mut App, t: usize, line: &str) {
     if line.trim_start().starts_with("pericia finalizar") || line.trim_start().starts_with("pericia avaliar") {
         let txt = pericia_core::assess::render(sim, &pericia_core::assess::evaluate(sim));
         app.finish_case(txt);
+    }
+    // operações periciais pela estação (`pericia <comando>`) têm o som da ação
+    if let Some(rest) = line.trim().strip_prefix("pericia ") {
+        crate::sfx::command(app, rest, code_ok);
     }
 }
 

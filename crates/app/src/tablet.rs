@@ -46,6 +46,8 @@ pub struct TabletUi {
     pub confirm_del: Option<(u32, f64)>,
     pub msg: Option<(String, f64)>,
     pub list_scroll: f32,
+    /// Sons pendentes (gravar/excluir anotação), tocados pelo desenho de som.
+    pub sfx: Vec<&'static str>,
 }
 
 // ---------------------------------------------------------------- persistência das anotações
@@ -128,6 +130,7 @@ impl TabletUi {
             }
         }
         self.persist();
+        self.sfx.push("nota_gravada");
         self.msg = Some(("Anotação gravada.".into(), get_time() + 2.5));
     }
     pub fn delete(&mut self, id: u32) {
@@ -136,6 +139,7 @@ impl TabletUi {
             self.new_draft();
         }
         self.persist();
+        self.sfx.push("papel");
         self.msg = Some(("Anotação excluída.".into(), get_time() + 2.5));
     }
     pub fn new_draft(&mut self) {
@@ -323,7 +327,8 @@ Deslocamento: W A S D (Shift corre) · olhar: botão direito ou Tab (captura o m
 Interagir com o objeto na mira: clique ou E — abre o painel compacto de ações
 Tablet: T abre e fecha (Esc também fecha); nada muda no caso ao abrir ou fechar
 Estação pericial: aproxime-se do computador da bancada e interaja
-Terminal: botão Terminal na barra superior; 'ajuda' lista os comandos";
+Terminal: botão Terminal na barra superior; 'ajuda' lista os comandos
+Configurações (som, gráficos, controles, interface): botão ⚙ na barra superior ou Esc no ambiente";
 
 fn apoio_blocks(sim: &Sim, sub: u8) -> Vec<B> {
     let mut v = vec![];
@@ -388,12 +393,18 @@ pub fn open(app: &mut App) {
     if app.tablet.item.is_none() {
         app.tablet.item = app.selected.clone().or_else(|| app.hover_pick.clone().filter(|p| p.starts_with("ITEM")));
     }
+    if !app.tablet.open {
+        app.audio.play("tablet_sacar", crate::audio::Cat::Interface, 1.0);
+    }
     app.tablet.open = true;
     app.tablet.scroll = 0.0;
     app.player.set_captured(false);
 }
 
 pub fn close(app: &mut App) {
+    if app.tablet.open {
+        app.audio.play("tablet_guardar", crate::audio::Cat::Interface, 1.0);
+    }
     app.tablet.open = false;
     if app.ui.focus.as_deref() == Some("tnote") {
         app.ui.focus = None;

@@ -13,13 +13,18 @@ pub struct Player {
     bob_t: f32,
     pub case: String,
     pub fov: f32,
+    /// Sensibilidade do mouse (multiplicador) e eixo vertical invertido — das configurações.
+    pub sens: f32,
+    pub invert_y: bool,
+    /// Passada concluída neste quadro (Some(correndo)) — usada pelo som dos passos.
+    pub step: Option<bool>,
 }
 
 const RADIUS: f32 = 0.28;
 
 impl Player {
     pub fn new() -> Player {
-        Player { pos: vec3(0.0, 0.0, 2.0), yaw: std::f32::consts::PI, pitch: -0.12, captured: false, bob_t: 0.0, case: String::new(), fov: 70f32.to_radians() }
+        Player { pos: vec3(0.0, 0.0, 2.0), yaw: std::f32::consts::PI, pitch: -0.12, captured: false, bob_t: 0.0, case: String::new(), fov: 70f32.to_radians(), sens: 1.0, invert_y: false, step: None }
     }
 
     pub fn place(&mut self, pos: Vec3, yaw: f32) {
@@ -54,8 +59,9 @@ impl Player {
         let d = mouse_delta_position();
         if self.captured || (look_area && is_mouse_button_down(MouseButton::Right)) {
             if d.length_squared() > 0.0 {
-                self.yaw += d.x * 2.4;
-                self.pitch = (self.pitch + d.y * 1.8).clamp(-1.35, 1.35);
+                self.yaw += d.x * 2.4 * self.sens;
+                let dy = if self.invert_y { -d.y } else { d.y };
+                self.pitch = (self.pitch + dy * 1.8 * self.sens).clamp(-1.35, 1.35);
                 moved = true;
             }
         }
@@ -97,7 +103,12 @@ impl Player {
             let speed = if is_key_down(KeyCode::LeftShift) { 2.6 } else { 1.5 };
             let step = wish.normalize() * speed * dt;
             self.try_move(world, step);
+            let before = (self.bob_t * 9.0 / std::f32::consts::TAU).floor();
             self.bob_t += dt * if speed > 2.0 { 1.4 } else { 1.0 };
+            // um passo por ciclo do balanço da cabeça (no ponto mais baixo)
+            if (self.bob_t * 9.0 / std::f32::consts::TAU).floor() != before {
+                self.step = Some(speed > 2.0);
+            }
             moved = true;
         }
         moved
