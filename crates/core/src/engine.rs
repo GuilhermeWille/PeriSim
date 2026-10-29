@@ -97,6 +97,8 @@ pub struct Sim {
     /// Faltas registradas (contaminação, conclusões sem base, etc.).
     pub faults: Vec<String>,
     pub artifact_seq: u32,
+    /// Último instante em que a bateria dos aparelhos foi atualizada.
+    pub last_drain: i64,
 }
 
 impl Sim {
@@ -120,6 +122,7 @@ impl Sim {
             suspect_alerted: false,
             faults: vec![],
             artifact_seq: 0,
+            last_drain: start,
         };
         s.audit.record(start, &s.actor, "abertura", &format!("Caso {} — {}", s.case.id, s.case.title), "sessão iniciada");
         s
@@ -149,6 +152,7 @@ impl Sim {
     /// Dispara eventos agendados cujo tempo já passou (apagamento remoto, etc.).
     fn run_events(&mut self) {
         let now = self.clock;
+        self.drain_batteries(now);
         // apagamento remoto de dispositivos móveis ainda conectados
         let mut wiped = vec![];
         for it in &mut self.case.items {
@@ -252,6 +256,7 @@ impl Sim {
             // --- móveis
             "isolar" => self.cmd_isolar(&a(1), &a(2)),
             "airplane" | "aviao" => self.cmd_airplane(&a(1)),
+            "imei" => self.cmd_imei(&a(1), &a(2)),
             "sim" => self.cmd_sim(&a(1), &a(2), &a(3)),
             "alarmes" => self.cmd_alarmes(&a(1)),
             "carregar" => self.cmd_carregar(&a(1)),
@@ -593,10 +598,16 @@ impl Sim {
     }
 
     fn cmd_energia(&mut self, sub: &str, id: &str) -> Output {
-        if sub != "desligar" {
-            return Output::err("Uso: energia desligar <item>");
+        if sub != "desligar" && sub != "ligar" {
+            return Output::err("Uso: energia desligar|ligar <item>");
         }
         let Some(i) = self.item_mut(id) else { return Output::err("Item não encontrado.") };
+        if self.case.items[i].phone.is_some() {
+            return self.phone_power(i, sub == "ligar");
+        }
+        if sub == "ligar" {
+            return Output::err("Não se liga um computador apreendido pelo sistema instalado (POP 5.03): use bloqueador ou boot forense na estação.");
+        }
         if !self.case.items[i].power_on {
             return Output::err("O item já está desligado.");
         }
@@ -878,6 +889,130 @@ impl Sim {
         self.case.items[i].set(&format!("sim{}_removido", sn), &icc);
         self.rec("sim-remover", &format!("{} slot {} ICCID {}", id.to_uppercase(), sn, icc), &format!("operadora {}", op));
         Output::ok(format!("SIM do slot {} removido. ICCID {} / operadora {}. Registre o slot e afixe o chip ao material.", sn, icc, op))
+    }
+
+    /// Descarga da bateria: ligado e sem alimentação perde carga; isolado em Faraday a
+    /// busca por sinal consome mais. Ao zerar, desliga e o estado AFU é perdido.
+    fn drain_batteries(&mut self, now: i64) {
+        let dt_min = ((now - self.last_drain) as f64 / 60.0).max(0.0);
+        self.last_drain = now;
+        if dt_min <= 0.0 {
+            return;
+        }
+        let mut died = vec![];
+        for it in &mut self.case.items {
+            let Some(ph) = &mut it.phone else { continue };
+            if ph.boot == Boot::Desligado || ph.battery_removed {
+                continue;
+            }
+            if ph.charging || ph.external_battery {
+                ph.battery = (ph.battery + dt_min * 0.5).min(100.0);
+                continue;
+            }
+            // %/min: ocioso ~0,12; procurando sinal dentro da blindagem ~0,35 (o rádio aumenta a potência)
+            let rate = if ph.rf.isolates() && !ph.airplane { 0.35 } else if ph.airplane { 0.06 } else { 0.12 };
+            ph.battery = (ph.battery - dt_min * rate).max(0.0);
+            if ph.battery <= 0.0 {
+                let was_afu = matches!(ph.boot, Boot::Afu | Boot::Desbloqueado);
+                ph.boot = Boot::Desligado;
+                died.push((it.id.clone(), was_afu));
+            }
+        }
+        for (id, was_afu) in died {
+            self.rec("evento", &format!("{}: bateria esgotada", id), "aparelho desligou");
+            if was_afu {
+                self.fault(&format!("A bateria do aparelho {} esgotou: o estado AFU (chaves em memória) foi perdido. O POP manda manter o aparelho isolado E carregando.", id));
+                if let Some(ph) = self.case.items.iter_mut().find(|i| i.id == id).and_then(|i| i.phone.as_mut()) {
+                    // ao religar, volta em BFU: extração de sistema de arquivos passa a depender de desbloqueio
+                    if ph.support_fs == FsSupport::Afu {
+                        ph.support_fs = FsSupport::Desbloqueado;
+                    }
+                }
+            }
+        }
+    }
+
+    /// IMEI lógico (*#06#) × etiqueta física. O código de serviço funciona no discador de
+    /// emergência, mesmo com a tela bloqueada, na maior parte dos aparelhos.
+    fn cmd_imei(&mut self, sub: &str, id: &str) -> Output {
+        let (sub, id) = if id.is_empty() { ("verificar", sub) } else { (sub, id) };
+        if sub != "verificar" {
+            return Output::err("Uso: imei verificar <item>");
+        }
+        let i = match self.phone_idx(id) { Ok(i) => i, Err(e) => return e };
+        let ph = self.case.items[i].phone.clone().unwrap();
+        if ph.boot == Boot::Desligado {
+            return Output::err("O aparelho está desligado: o IMEI lógico (*#06#) exige o aparelho ligado. A etiqueta física pode ser lida na bandeja/traseira.");
+        }
+        self.tick(2);
+        let mut out = String::from("IMEI — conferência física × lógica:\n");
+        let mut diverge = false;
+        for (k, (logico, fisico)) in ph.imeis.iter().zip(ph.imei_label.iter()).enumerate() {
+            let ok = logico == fisico;
+            diverge |= !ok;
+            out.push_str(&format!("  slot {}: lógico (*#06#) {}  ·  etiqueta {}  [{}]\n", k + 1, logico, fisico, if ok { "CONFERE" } else { "DIVERGE" }));
+        }
+        if diverge {
+            self.case.items[i].set("divergencia_imei", "sim");
+            out.push_str("ATENÇÃO: divergência entre IMEI lógico e etiqueta física (possível troca de carcaça/etiqueta ou adulteração). Registrar no laudo.\n");
+        }
+        self.case.items[i].set("imei_conferido", "sim");
+        self.rec("imei-verificar", &id.to_uppercase(), if diverge { "DIVERGÊNCIA físico × lógico" } else { "IMEI físico confere com o lógico" });
+        Output::ok(out)
+    }
+
+    /// Ligar/desligar aparelho móvel. Ligar fora do isolamento permite que ele se conecte
+    /// (o comando remoto pode chegar); desligar em AFU descarta as chaves em memória.
+    fn phone_power(&mut self, i: usize, on: bool) -> Output {
+        let id = self.case.items[i].id.clone();
+        let ph = self.case.items[i].phone.clone().unwrap();
+        if on {
+            if ph.boot != Boot::Desligado {
+                return Output::err("O aparelho já está ligado.");
+            }
+            if ph.battery <= 0.0 && !ph.external_battery && !ph.charging {
+                return Output::err("Sem carga: conecte uma bateria externa antes de ligar.");
+            }
+            self.tick(2);
+            {
+                let p = self.ph(i);
+                p.boot = Boot::Bfu;
+                let isolated = p.rf.isolates() || p.airplane;
+                p.cellular = !isolated;
+                p.wifi = !isolated;
+            }
+            self.case.items[i].power_on = true;
+            let isolated = ph.rf.isolates() || ph.airplane;
+            if !isolated {
+                self.fault(&format!("Aparelho {} ligado fora do isolamento de radiofrequência: pôde se conectar à rede.", id));
+            }
+            self.rec("energia-ligar", &id, if isolated { "ligado dentro do isolamento (BFU)" } else { "ligado SEM isolamento" });
+            return Output::ok(format!(
+                "Aparelho {} ligado. Estado: BFU (antes do primeiro desbloqueio).{}",
+                id,
+                if isolated { "" } else { "\nATENÇÃO: ligado fora do isolamento — o aparelho pode se conectar e receber comandos remotos." }
+            ));
+        }
+        if ph.boot == Boot::Desligado {
+            return Output::err("O aparelho já está desligado.");
+        }
+        self.tick(1);
+        let was_afu = matches!(ph.boot, Boot::Afu | Boot::Desbloqueado);
+        let extracted = self.audit.entries.iter().any(|e| e.action == "extracao" && e.detail.starts_with(&id));
+        {
+            let p = self.ph(i);
+            p.boot = Boot::Desligado;
+            p.charging = false;
+            if was_afu && p.support_fs == FsSupport::Afu {
+                p.support_fs = FsSupport::Desbloqueado;
+            }
+        }
+        self.case.items[i].power_on = false;
+        if was_afu && !extracted && self.case.module == ModuleId::M502 {
+            self.fault(&format!("Aparelho {} desligado em AFU antes da extração: as chaves em memória foram perdidas (POP 5.02: verificar a integridade da extração antes de desligar).", id));
+        }
+        self.rec("energia-desligar", &id, if was_afu { "desligado — estado AFU descartado" } else { "desligado" });
+        Output::ok(format!("Aparelho {} desligado.{}", id, if was_afu { " O estado AFU foi descartado: ao religar, estará em BFU." } else { "" }))
     }
 
     fn cmd_alarmes(&mut self, id: &str) -> Output {

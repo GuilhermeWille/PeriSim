@@ -52,7 +52,7 @@ Físico:          fotografar · lacre conferir|aplicar · deslacrar · abrir · 
                  midia listar|remover · bloqueio · imagem · sanitizar · clone · hash · verificar-hash
                  energia desligar · memoria · volume copiar · rede isolar · inspecionar <local|item>
 Móveis:          isolar <item> faraday|aluminio · airplane · sim remover · alarmes · carregar
-                 camera cobrir <item> · solicitar-senhas <item>
+                 camera cobrir <item> · solicitar-senhas <item> · imei verificar <item>
                  desbloquear <item> <senha> · extrair <item> fisica|fs|logica · senha
 Coleta:          embalar · etiquetar
 Investigação:    fs ... · recuperar · expandir · decifrar · ocr · dicionario

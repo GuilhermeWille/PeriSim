@@ -59,12 +59,20 @@ fn make_phone(c: &mut Ctx, data_media: &str, afu: bool) -> (PhoneState, Vec<Sour
         os: os.to_string(),
         os_version: format!("{}.{}", c.rng.int(11, 17), c.rng.int(0, 5)),
         imeis: vec![imei1.clone(), imei2.clone()],
-        imei_label: vec![imei1, imei2],
+        imei_label: if c.d == 4 && c.rng.chance(0.5) {
+            // etiqueta física adulterada/trocada: dois dígitos permutados
+            let mut ch: Vec<char> = imei1.chars().collect();
+            ch.swap(5, 9);
+            if ch[5] == ch[9] { ch[9] = if ch[9] == '9' { '0' } else { ((ch[9] as u8) + 1) as char }; }
+            vec![ch.into_iter().collect(), imei2]
+        } else {
+            vec![imei1, imei2]
+        },
         lock: if c.d == 1 { "nenhum".into() } else { "pin".into() },
         passcode,
         smartlock: if c.d == 2 && c.rng.chance(0.4) { Some("bluetooth".into()) } else { None },
         boot: if c.d == 1 { Boot::Desbloqueado } else if afu { Boot::Afu } else { Boot::Bfu },
-        battery: c.rng.int(20, 90) as f64,
+        battery: if c.d >= 3 { c.rng.int(9, 30) } else { c.rng.int(35, 90) } as f64,
         charging: false,
         battery_removable: false,
         battery_removed: false,

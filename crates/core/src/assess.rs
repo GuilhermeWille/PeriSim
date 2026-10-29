@@ -52,6 +52,7 @@ pub fn checklist(s: &Sim) -> Vec<(bool, String)> {
             v.push((any_item(s, "isolado_rf") || any_item(s, "modo_aviao"), "Isolar comunicações (RF/modo avião) (POP 5.02)".into()));
             v.push((a.has("sim-remover"), "Remover SIM registrando o slot".into()));
             v.push((a.has("carregar"), "Garantir alimentação (AFU)".into()));
+            v.push((a.has("imei-verificar"), "Conferir IMEI físico × lógico (*#06#)".into()));
             v.push((a.has("extracao"), "Realizar a extração mais completa possível".into()));
             v.push((a.has("verificar-hash") || a.has("hash"), "Registrar hash da extração".into()));
             v.push((s.keyword_found, "Localizar a expressão de interesse".into()));
@@ -132,6 +133,9 @@ pub fn evaluate(s: &Sim) -> Vec<Criterion> {
     let mut c4 = crit("Registro de ações e cadeia de custódia", 10);
     if a.verify().is_err() {
         lose(&mut c4, 10, "A trilha de auditoria foi adulterada.");
+    }
+    if s.case.items.iter().any(|i| i.flag("divergencia_imei")) && !text_of(s).contains("imei") {
+        lose(&mut c4, 4, "Divergência de IMEI físico × lógico detectada mas não registrada no documento.");
     }
     if s.case.items.iter().any(|i| i.flag("divergencia_lacre")) {
         if !text_of(s).contains("lacre") && !text_of(s).contains("diverg") {

@@ -9,7 +9,7 @@ Simulador de treinamento em perícia de informática, no estilo “hacking simul
 Duas áreas, como pedido:
 
 * **Área de Hardware (3D)** — bancada de laboratório ou local de busca (escritório). Você vê os equipamentos (gabinetes, notebook, celular, HDs, pendrives), a câmera, o bloqueador de escrita, Faraday bag, lacres e a estação pericial ao fundo. Clique num item para ver o estado e as ações físicas disponíveis: fotografar, conferir lacre, deslacrar, isolar da rede, coletar memória, copiar volume cifrado montado, desligar, abrir gabinete, remover componentes (e descobrir mídias escondidas sob o dissipador), remover mídia, conectar bloqueador, adquirir imagem, conferir hash, isolar o celular, remover SIM, extrair, embalar, lacrar, etiquetar.
-* **Estação Pericial** — um PC na cena 3D; ao usá‑lo você entra no **PeritOS**: terminal, navegador de evidências (sobre as imagens adquiridas), navegador da rede emulada (DNS, WHOIS, traceroute, páginas, histórico, cabeçalho de e‑mail, logs do provedor/CGNAT), cadeia de custódia, linha do tempo, editor do documento (laudo ou termo de apreensão), manual dos POPs, mentor e avaliação.
+* **Estação Pericial** — um PC na cena 3D cujo monitor mostra a tela real da estação. Ao usá‑lo você entra no **Perícia Linux 12.4**, um Linux simulado (não é VM): tela de login, painel com menu *Aplicativos* e lista de janelas, janelas móveis/redimensionáveis, **Terminal bash** (pipes, redirecionamento, `&&`/`||`, variáveis, curingas, histórico, Tab), **Arquivos**, **Editor de texto** e os aplicativos do simulador (Navegador da rede emulada, Documento pericial, Visualizador de evidências, Linha do tempo, Custódia, Manual, Mentor, Avaliação). Comandos gerais: `ls cd cat grep find stat file sha256sum mount umount lsblk dmesg df head tail wc sort uniq tree cp mv rm mkdir touch echo man…`, com `/dev`, `/proc`, `/mnt` e montagens somente leitura. As operações periciais são feitas com o comando `pericia <comando>` (ex.: `pericia imagem m-01`), que passa pelas regras do POP e pela auditoria.
 
 Cada botão gera um **comando do terminal** (que aparece no terminal), então você aprende a sintaxe enquanto joga. Cada caso tem uma **expressão‑alvo** escondida nos vestígios; achá‑la não basta: a avaliação considera procedimento, preservação, rastreabilidade e fundamentação, e **perda de evidência limita a nota a 60%**.
 
@@ -32,6 +32,9 @@ Cada botão gera um **comando do terminal** (que aparece no terminal), então vo
 | Avaliação explicada + mentor adaptativo | Implementados |
 | Persistência (continuar caso, histórico, configurações) | Implementada por replay determinístico |
 | Interface 3D + modo 2D leve + economia de energia | Implementados |
+| Linux simulado na estação (desktop, terminal bash, arquivos, editor) | Implementado; replay do terminal reproduz a auditoria (testado) |
+| Regras realistas do aparelho móvel: bateria em AFU, IMEI físico × lógico, ligar/desligar | Implementadas e testadas |
+| Tela simulada do celular | **Não implementada** (interrompida por filtro de segurança da IA que desenvolveu o projeto) |
 | **Linux** | Compilado, executado e medido (OpenGL por software, sem GPU) |
 | **Windows / macOS** | **Não testados** — o código não usa nada específico de Linux; compile nativamente (abaixo) |
 
@@ -40,9 +43,10 @@ Cada botão gera um **comando do terminal** (que aparece no terminal), então vo
 ## Executar (Linux x86_64)
 
 ```bash
-tar xzf pericia-sim-0.1.0-linux-x86_64.tar.gz
-cd pericia-sim-0.1.0-linux-x86_64
-./pericia-sim
+tar xzf pericia-sim-0.2.0-linux-x86_64.tar.gz
+cd pericia-sim-0.2.0-linux-x86_64
+./pericia-sim          # rodar direto
+./install.sh           # ou instalar no menu de aplicativos (sem sudo)
 ```
 
 Requer apenas as bibliotecas OpenGL/X11 do sistema (presentes em qualquer desktop Linux). Funciona com o driver por software do Mesa (`llvmpipe`) quando não há GPU.
@@ -54,7 +58,7 @@ Requer apenas as bibliotecas OpenGL/X11 do sistema (presentes em qualquer deskto
 3. Na pasta do projeto:
 
 ```bash
-cargo test -p pericia_core          # 37 testes do motor
+cargo test --workspace              # 50 testes (motor, Linux simulado, replay)
 cargo run --release -p pericia_app  # abre o simulador
 ```
 
@@ -66,7 +70,7 @@ No Windows e no macOS o mesmo comando gera o executável nativo (`target/release
 2. Leia o caso: botão **Mentor** ou, na Estação, aplicativo **Caso** (histórico, objetivo, quesitos, autorização legal).
 3. Na **Área de Hardware**: botão direito gira a câmera, roda aproxima, clique seleciona. Use as ações do painel direito na ordem do POP.
 4. Adquira a mídia (bloqueador → imagem → verificar hash) ou extraia o celular.
-5. Na **Estação Pericial** → *Usar a estação*: examine em **Evidências**, investigue em **Navegador**, cruze em **Linha do tempo**.
+5. Na **Estação Pericial**, clique na tela e entre com a senha `perito`. No Terminal: `lsblk`, `pericia imagem m-01`, `sudo mkdir -p /mnt/m01`, `sudo mount -o ro,loop ~/casos/<ID>/M-01.dd /mnt/m01`, `grep -ril <termo> /mnt/m01`, `stat`, `sha256sum`. Use também **Arquivos**, **Navegador** e **Linha do tempo** (menu *Aplicativos*).
 6. Quando achar a expressão, registre com `achei <expressão>`; no **Documento**, use *Pré‑preencher*, revise, escreva a conclusão separando fato de inferência, *Verificar coerência* e *Emitir e finalizar*.
 7. Leia a **Avaliação**: cada ponto perdido traz o motivo.
 

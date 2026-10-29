@@ -201,7 +201,7 @@ fn fluxo_502_isolado_extrai_e_encontra() {
     for d in 1..=3u8 {
         for seed in 0..10 {
             let mut s = Sim::new(generate(ModuleId::M502, d, seed));
-            run(&mut s, &["fotografar item-01", "isolar item-01 faraday", "carregar item-01", "sim remover item-01 1"]);
+            run(&mut s, &["fotografar item-01", "isolar item-01 faraday", "carregar item-01", "imei verificar item-01", "sim remover item-01 1"]);
             if let Some((_, pin)) = s.case.provided_passwords.first().cloned() {
                 s.exec(&format!("desbloquear item-01 {}", pin));
             }
@@ -414,9 +414,15 @@ fn terminal_nao_executa_comandos_do_sistema() {
 
 #[test]
 fn motor_nao_usa_rede_nem_processos() {
-    let dir = concat!(env!("CARGO_MANIFEST_DIR"), "/src");
-    for e in std::fs::read_dir(dir).unwrap() {
-        let p = e.unwrap().path();
+    fn rs_files(d: &std::path::Path, out: &mut Vec<std::path::PathBuf>) {
+        for e in std::fs::read_dir(d).unwrap() {
+            let p = e.unwrap().path();
+            if p.is_dir() { rs_files(&p, out) } else if p.extension().map(|x| x == "rs").unwrap_or(false) { out.push(p) }
+        }
+    }
+    let mut files = vec![];
+    rs_files(std::path::Path::new(concat!(env!("CARGO_MANIFEST_DIR"), "/src")), &mut files);
+    for p in files {
         let src = std::fs::read_to_string(&p).unwrap();
         for bad in ["std::net", "TcpStream", "UdpSocket", "std::process", "Command::new", "reqwest", "hyper", "ureq"] {
             assert!(!src.contains(bad), "{} usa {}", p.display(), bad);
@@ -452,5 +458,68 @@ fn preenchimento_automatico_nao_cria_incoerencias() {
             let c = report::check_coherence(&s);
             assert!(c.problems.is_empty(), "{:?} D{}: {:?}", m, d, c.problems);
         }
+    }
+}
+
+#[test]
+fn bateria_esgota_em_afu_sem_alimentacao_e_perde_estado() {
+    // aparelho em AFU, isolado mas sem bateria externa: a busca por sinal drena mais rápido
+    let mut found = false;
+    for seed in 0..40 {
+        let mut s = Sim::new(generate(ModuleId::M502, 3, seed));
+        if s.case.items[0].phone.as_ref().unwrap().boot != Boot::Afu { continue; }
+        found = true;
+        s.exec("isolar item-01 faraday");
+        for _ in 0..40 { s.exec("fotografar item-01"); }
+        let ph = s.case.items[0].phone.as_ref().unwrap();
+        assert_eq!(ph.boot, Boot::Desligado, "bateria deveria ter esgotado (restou {:.1}%)", ph.battery);
+        assert!(s.faults.iter().any(|f| f.contains("AFU")));
+        break;
+    }
+    assert!(found, "nenhuma semente gerou AFU no D3");
+}
+
+#[test]
+fn bateria_externa_preserva_afu() {
+    for seed in 0..40 {
+        let mut s = Sim::new(generate(ModuleId::M502, 3, seed));
+        if s.case.items[0].phone.as_ref().unwrap().boot != Boot::Afu { continue; }
+        s.exec("isolar item-01 faraday");
+        s.exec("carregar item-01");
+        for _ in 0..40 { s.exec("fotografar item-01"); }
+        assert_eq!(s.case.items[0].phone.as_ref().unwrap().boot, Boot::Afu);
+        return;
+    }
+}
+
+#[test]
+fn imei_fisico_x_logico_detecta_divergencia() {
+    let mut seen = false;
+    for seed in 0..30 {
+        let mut s = Sim::new(generate(ModuleId::M502, 4, seed));
+        s.exec("isolar item-01 faraday");
+        let out = s.exec("imei verificar item-01").text;
+        let ph = s.case.items[0].phone.as_ref().unwrap();
+        let diverge = ph.imeis[0] != ph.imei_label[0];
+        assert_eq!(out.contains("DIVERGE"), diverge);
+        seen |= diverge;
+    }
+    assert!(seen, "D4 deve sortear etiquetas divergentes em parte dos casos");
+}
+
+#[test]
+fn ligar_celular_fora_do_isolamento_e_falha_e_desligar_em_afu_descarta_estado() {
+    for seed in 0..40 {
+        let mut s = Sim::new(generate(ModuleId::M502, 3, seed));
+        if s.case.items[0].phone.as_ref().unwrap().boot != Boot::Afu { continue; }
+        s.exec("isolar item-01 faraday");
+        s.exec("carregar item-01");
+        assert!(s.exec("energia desligar item-01").ok);
+        assert!(s.faults.iter().any(|f| f.contains("AFU")));
+        assert_eq!(s.case.items[0].phone.as_ref().unwrap().boot, Boot::Desligado);
+        assert!(s.exec("energia ligar item-01").ok);
+        assert_eq!(s.case.items[0].phone.as_ref().unwrap().boot, Boot::Bfu);
+        assert!(!s.faults.iter().any(|f| f.contains("fora do isolamento")), "estava isolado");
+        return;
     }
 }

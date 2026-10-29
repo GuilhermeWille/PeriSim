@@ -3,6 +3,7 @@
 //! Estação Pericial (um PC na cena 3D cujo monitor abre o "PeritOS", com software/rede).
 
 mod desktop;
+mod linuxde;
 mod save;
 mod scene3d;
 mod ui;
@@ -70,6 +71,7 @@ pub struct App {
     pub toast: Option<(String, f64)>,
     pub history: Vec<save::HistoryEntry>,
     pub show_help_overlay: bool,
+    pub de: linuxde::LinuxDe,
 }
 
 impl App {
@@ -146,7 +148,10 @@ impl App {
 
     pub fn resume(&mut self) {
         match save::load_current().map(|sg| save::replay(&sg).map(|s| (s, sg.commands))) {
-            Some(Ok((sim, cmds))) => {
+            Some(Ok(((sim, os), cmds))) => {
+                self.de = linuxde::LinuxDe::new();
+                self.de.os_case = sim.case.id.clone();
+                self.de.os = Some(os);
                 self.term.lines = format!("Sessão restaurada por replay de {} comando(s). Auditoria verificada.\n", cmds.len());
                 self.sim = Some(sim);
                 self.cmdlog = cmds;
@@ -659,17 +664,25 @@ fn side_panel(app: &mut App, panel: Rect) {
 fn station(app: &mut App, area: Rect) {
     let s = app.ui.scale;
     if app.station_zoom || !app.settings.render3d {
-        desktop::draw(app, area);
-        // botão para sair da tela
-        let r = rect(area.x + area.w - 150.0 * s, area.y + area.h - 34.0 * s, 140.0 * s, 26.0 * s);
-        if app.settings.render3d && app.ui.button(r, "◄ Afastar da tela") {
-            desktop::sync_laudo(app);
-            app.station_zoom = false;
+        linuxde::draw(app, area);
+        app.de.preview_age += 1;
+        if app.settings.render3d && app.de.preview_age >= 90 {
+            app.de.preview_age = 0;
+            linuxde::capture(app, area);
+        }
+        if app.settings.render3d {
+            let r = rect(area.x + area.w - 150.0 * s, area.y + area.h - 30.0 * s, 144.0 * s, 24.0 * s);
+            if app.ui.button(r, "◄ Afastar da tela") {
+                linuxde::capture(app, area);
+                desktop::sync_laudo(app);
+                app.station_zoom = false;
+            }
         }
         return;
     }
-    // vista 3D da estação montada: clicar no monitor dá acesso ao PeritOS
-    let mk = || Camera3D { position: vec3(0.55, 1.55, 1.25), target: vec3(0.0, 1.0, -0.2), up: vec3(0., 1., 0.), fovy: 0.8, ..Default::default() };
+    // vista 3D da estação: o monitor mostra a área de trabalho (miniatura renderizada)
+    let tex = app.de.snapshot.clone();
+    let mk = || Camera3D { position: vec3(0.42, 1.50, 1.05), target: vec3(0.0, 1.08, -0.25), up: vec3(0., 1., 0.), fovy: 0.8, ..Default::default() };
     let cam = mk();
     let sh = screen_height();
     let mut c = mk();
@@ -681,39 +694,64 @@ fn station(app: &mut App, area: Rect) {
     b.bx(vec3(0.0, 1.5, -1.0), vec3(6.0, 3.0, 0.05), rgb(150, 160, 172));
     b.bx(vec3(0.0, 0.38, -0.2), vec3(1.6, 0.76, 0.8), rgb(60, 64, 72));
     workstation(&mut b, vec3(0.0, 0.80, -0.2), true);
-    // mídias de trabalho/imagens sobre a mesa (uma por imagem adquirida)
     if let Some(sim) = &app.sim {
-        for (k, _) in sim.imaged.iter().enumerate() {
-            b.bx(vec3(-0.45 + k as f32 * 0.14, 0.82, 0.12), vec3(0.1, 0.026, 0.14), rgb(150, 156, 164));
+        let wb_on = sim.hashes.keys().any(|k| k.starts_with("wb:"));
+        if wb_on {
+            b.bx(vec3(-0.5, 0.86, -0.15), vec3(0.03, 0.012, 0.004), rgb(60, 240, 110));
+        }
+        for (k, _) in sim.attached_media().iter().enumerate() {
+            b.bx(vec3(-0.62 - k as f32 * 0.13, 0.82, 0.0), vec3(0.1, 0.026, 0.147), rgb(150, 156, 164));
+            b.bx(vec3(-0.56 - k as f32 * 0.13, 0.81, -0.08), vec3(0.008, 0.008, 0.16), rgb(30, 30, 30));
         }
     }
     b.finish();
+    if let Some(t) = tex {
+        draw_screen_quad(&t, vec3(-0.36, 0.985, -0.333), vec3(0.36, 1.385, -0.333));
+    }
     set_default_camera();
-    let mon = project(&cam, area, vec3(0.0, 1.18, -0.36));
+    let mon = project(&cam, area, vec3(0.0, 0.94, -0.33));
     if let Some(p) = mon {
-        let r = rect(p.x - 120.0 * s, p.y - 16.0 * s, 240.0 * s, 32.0 * s);
-        if app.ui.button_c(r, "Usar a estação (PeritOS)", T.accent2, true) {
+        let r = rect(p.x - 110.0 * s, p.y, 220.0 * s, 30.0 * s);
+        if app.ui.button_c(r, "Usar a estação", T.accent2, true) {
             app.station_zoom = true;
         }
     }
-    let monitor_r = rect(area.x + area.w * 0.25, area.y + area.h * 0.12, area.w * 0.5, area.h * 0.5);
-    if app.ui.click_in(monitor_r) {
-        app.station_zoom = true;
+    let corner_a = project(&cam, area, vec3(-0.36, 1.385, -0.333));
+    let corner_b = project(&cam, area, vec3(0.36, 0.985, -0.333));
+    if let (Some(a), Some(bb)) = (corner_a, corner_b) {
+        if app.ui.click_in(Rect::new(a.x, a.y, bb.x - a.x, bb.y - a.y)) {
+            app.station_zoom = true;
+        }
     }
-    app.ui.text("Estação pericial com bloqueador de escrita. As imagens adquiridas na Área de Hardware ficam disponíveis aqui.", area.x + 16.0 * s, area.y + area.h - 16.0 * s, 12.0, F::Reg, T.dim);
+    app.ui.text("Estação pericial (Perícia Linux) com bloqueador de escrita. Clique na tela para usar.", area.x + 16.0 * s, area.y + area.h - 16.0 * s, 12.0, F::Reg, T.dim);
+}
+
+/// Quadrilátero texturizado (tela do monitor) entre dois cantos no mesmo plano z.
+fn draw_screen_quad(t: &Texture2D, a: Vec3, b: Vec3) {
+    use macroquad::models::Vertex;
+    let v = |x: f32, y: f32, u: f32, w: f32| Vertex { position: vec3(x, y, a.z), uv: vec2(u, w), color: [255, 255, 255, 255], normal: Vec4::ZERO };
+    // a textura do render target vem invertida verticalmente
+    let mesh = Mesh {
+        vertices: vec![v(a.x, a.y, 0.0, 0.0), v(b.x, a.y, 1.0, 0.0), v(b.x, b.y, 1.0, 1.0), v(a.x, b.y, 0.0, 1.0)],
+        indices: vec![0, 1, 2, 0, 2, 3],
+        texture: Some(t.clone()),
+    };
+    draw_mesh(&mesh);
 }
 
 fn game(app: &mut App) {
     clear_background(T.bg);
     let top = top_bar(app);
     let s = app.ui.scale;
-    let term_h = if app.term_open { 190.0 * s } else { 0.0 };
+    // na área de trabalho Linux o terminal do simulador fica oculto (o Linux tem o seu)
+    let show_term = app.term_open && !(app.area == Area::Station && (app.station_zoom || !app.settings.render3d));
+    let term_h = if show_term { 190.0 * s } else { 0.0 };
     let area = rect(0.0, top + 1.0, screen_width(), screen_height() - top - 1.0 - term_h);
     match app.area {
         Area::Hardware => hardware(app, area),
         Area::Station => station(app, area),
     }
-    if app.term_open {
+    if show_term {
         let tr = rect(4.0 * s, screen_height() - term_h + 2.0 * s, screen_width() - 8.0 * s, term_h - 6.0 * s);
         draw_terminal(app, tr, false);
     }
@@ -795,6 +833,33 @@ fn run_script(app: &mut App, sc: &mut Script) -> bool {
             app.desk.nav_view = out;
         }
         "laudo" => desktop::load_laudo(app),
+        "login" => {
+            linuxde::ensure_os(app);
+            app.de.logged = true;
+            if app.de.terms.is_empty() {
+                linuxde::open(app, linuxde::WinKind::Terminal(0));
+            }
+        }
+        "lt" => {
+            if app.de.terms.is_empty() {
+                linuxde::open(app, linuxde::WinKind::Terminal(0));
+            }
+            linuxde::exec_line(app, 0, &arg);
+        }
+        "deopen" => {
+            let k = match arg.as_str() {
+                "files" => linuxde::WinKind::Files,
+                "editor" => linuxde::WinKind::Editor,
+                "nav" => linuxde::WinKind::Navegador,
+                "doc" => linuxde::WinKind::Documento,
+                "caso" => linuxde::WinKind::Caso,
+                _ => linuxde::WinKind::Terminal(0),
+            };
+            linuxde::open(app, k);
+        }
+        "cwd" => app.de.files_cwd = arg,
+        "edit" => linuxde::open_in_editor(app, &arg),
+        "menuopen" => app.de.menu_open = true,
         "menu" => {
             app.screen = Screen::Menu;
             app.history = save::history();
@@ -838,6 +903,7 @@ async fn main() {
         toast: None,
         history: save::history(),
         show_help_overlay: false,
+        de: linuxde::LinuxDe::new(),
     };
     // roteiro opcional para capturas automáticas (validação headless)
     let mut script = std::env::var("PERICIA_SCRIPT").ok().and_then(|p| std::fs::read_to_string(p).ok()).map(|t| Script {

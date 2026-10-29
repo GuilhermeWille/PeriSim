@@ -216,6 +216,7 @@ pub fn build_hardware(b: &mut Batch, sim: &Sim, selected: Option<&str>) -> Vec<P
             base = vec3(x, 0.0, 0.15); // sob a mesa
         }
         let half = draw_item(b, sim, it, base);
+        contact_shadow(b, base, half);
         let center = base + vec3(0.0, half.y, 0.0);
         if selected == Some(it.id.as_str()) {
             outline(b, center, half + Vec3::splat(0.02));
@@ -263,6 +264,14 @@ fn outline(b: &mut Batch, c: Vec3, h: Vec3) {
     }
 }
 
+/// Sombra de contato aproximada (camadas escuras finas sobre a superfície de apoio).
+fn contact_shadow(b: &mut Batch, base: Vec3, half: Vec3) {
+    for (k, grow) in [(0, 1.18f32), (1, 1.06)] {
+        let a = if k == 0 { 0.18 } else { 0.30 };
+        b.bx(base + vec3(0.0, 0.0012 + k as f32 * 0.0006, 0.0), vec3(half.x * 2.0 * grow, 0.001, half.z * 2.0 * grow), Color::new(0.0, 0.0, 0.0, a));
+    }
+}
+
 fn room(b: &mut Batch, local: bool) {
     // piso e paredes
     let floor = if local { rgb(120, 98, 78) } else { rgb(70, 76, 86) };
@@ -270,6 +279,15 @@ fn room(b: &mut Batch, local: bool) {
     let wall = if local { rgb(196, 186, 168) } else { rgb(150, 160, 172) };
     b.bx(vec3(0.0, 1.5, -3.1), vec3(7.0, 3.0, 0.05), wall);
     b.bx(vec3(-3.5, 1.5, -0.4), vec3(0.05, 3.0, 5.5), Color::new(wall.r * 0.92, wall.g * 0.92, wall.b * 0.92, 1.0));
+    // rodapé
+    b.bx(vec3(0.0, 0.05, -3.07), vec3(7.0, 0.1, 0.02), Color::new(wall.r * 0.7, wall.g * 0.7, wall.b * 0.7, 1.0));
+    // janela com luz difusa na parede lateral
+    b.bx(vec3(-3.47, 1.65, -0.9), vec3(0.02, 1.1, 1.5), rgb(200, 222, 240));
+    b.bx(vec3(-3.46, 1.65, -0.9), vec3(0.02, 1.16, 0.04), rgb(235, 235, 238));
+    b.bx(vec3(-3.46, 1.65, -0.9), vec3(0.02, 0.04, 1.56), rgb(235, 235, 238));
+    // luminária no teto
+    b.bx(vec3(0.0, 2.95, -0.2), vec3(1.2, 0.04, 0.25), rgb(240, 240, 236));
+    b.bx(vec3(0.0, 2.93, -0.2), vec3(1.1, 0.01, 0.2), rgb(255, 252, 230));
     if local {
         // mesa de escritório, cadeira, gaveteiro, estante
         let wood = rgb(140, 100, 64);
@@ -407,6 +425,13 @@ fn tower(b: &mut Batch, _sim: &Sim, it: &Item, base: Vec3) -> Vec3 {
     b.bx(c + vec3(w / 2.0 - 0.005, 0.0, 0.0), vec3(0.01, h, d), body);
     // frente
     b.bx(c + vec3(0.0, 0.0, d / 2.0 - 0.01), vec3(w, h, 0.02), rgb(34, 36, 42));
+    for k in 0..2 {
+        b.bx(c + vec3(0.0, h / 2.0 - 0.07 - k as f32 * 0.045, d / 2.0 + 0.001), vec3(w * 0.8, 0.035, 0.003), rgb(48, 50, 58));
+    }
+    for k in 0..6 {
+        b.bx(c + vec3(0.0, -0.05 - k as f32 * 0.022, d / 2.0 + 0.001), vec3(w * 0.7, 0.006, 0.003), rgb(22, 23, 27));
+    }
+    b.bx(c + vec3(-0.04, h / 2.0 - 0.05, d / 2.0 + 0.003), vec3(0.018, 0.018, 0.004), rgb(80, 84, 94));
     let led = if it.power_on { rgb(70, 240, 120) } else { rgb(40, 50, 40) };
     b.bx(c + vec3(0.04, h / 2.0 - 0.05, d / 2.0 + 0.002), vec3(0.015, 0.015, 0.004), led);
     if !side_removed {
@@ -498,6 +523,11 @@ fn phone(b: &mut Batch, it: &Item, base: Vec3) -> Vec3 {
         None => rgb(10, 10, 12),
     };
     b.bx(c + vec3(0.0, 0.0047, 0.0), vec3(w * 0.9, 0.0008, d * 0.92), screen);
+    // moldura, alto-falante, câmera frontal e botões laterais
+    b.bx(c + vec3(0.0, 0.0049, -d * 0.475), vec3(w * 0.25, 0.0006, 0.004), rgb(50, 52, 58));
+    b.bx(c + vec3(w * 0.2, 0.0049, -d * 0.475), vec3(0.006, 0.0006, 0.006), rgb(8, 8, 10));
+    b.bx(c + vec3(w / 2.0 + 0.002, 0.0, -d * 0.18), vec3(0.003, 0.005, 0.03), rgb(60, 62, 70));
+    b.bx(c + vec3(-w / 2.0 - 0.002, 0.0, -d * 0.22), vec3(0.003, 0.005, 0.045), rgb(60, 62, 70));
     if ph.map(|p| p.screen_broken).unwrap_or(false) || it.physical.damage.iter().any(|x| x.contains("tela")) {
         for k in 0..4 {
             b.boxr(c + vec3(-0.01 + k as f32 * 0.006, 0.0053, 0.02 - k as f32 * 0.01), vec3(0.002, 0.0006, 0.07), 0.4 + k as f32 * 0.5, rgb(230, 230, 230));

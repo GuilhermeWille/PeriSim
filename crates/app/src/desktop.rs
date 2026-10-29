@@ -156,6 +156,7 @@ fn evidence_entries(app: &App) -> Vec<EvEntry> {
     out
 }
 
+#[allow(dead_code)]
 pub fn draw(app: &mut App, area: Rect) {
     let ui_s = app.ui.scale;
     let side_w = 150.0 * ui_s;
@@ -242,7 +243,7 @@ pub fn switch(app: &mut App, a: DApp) {
     }
 }
 
-fn evidencias(app: &mut App, body: Rect) {
+pub fn evidencias(app: &mut App, body: Rect) {
     let entries = evidence_entries(app);
     let s = app.ui.scale;
     let list = rect(body.x, body.y, body.w * 0.46, body.h);
@@ -354,7 +355,7 @@ fn evidencias(app: &mut App, body: Rect) {
     app.desk.ev_out_scroll = sc;
 }
 
-fn navegador(app: &mut App, body: Rect) {
+pub fn navegador(app: &mut App, body: Rect) {
     let s = app.ui.scale;
     let bh = 28.0 * s;
     let has_net = app.sim.as_ref().map(|x| x.case.net.is_some() || !x.case.provided.is_empty()).unwrap_or(false);
@@ -489,7 +490,7 @@ pub fn sync_laudo(app: &mut App) {
     }
 }
 
-fn laudo(app: &mut App, body: Rect) {
+pub fn laudo(app: &mut App, body: Rect) {
     let s = app.ui.scale;
     let Some(sim) = &app.sim else { return };
     let doc = sim.case.module.document();
@@ -571,7 +572,7 @@ fn laudo(app: &mut App, body: Rect) {
     app.desk.scroll = sc;
 }
 
-fn manual(app: &mut App, body: Rect) {
+pub fn manual(app: &mut App, body: Rect) {
     let s = app.ui.scale;
     let bh = 28.0 * s;
     let bw = (body.w - 4.0 * 5.0 * s) / 6.0;

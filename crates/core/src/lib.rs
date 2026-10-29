@@ -25,3 +25,5 @@ pub mod report;
 pub mod assess;
 pub mod pdf;
 pub mod manual;
+pub mod osapi;
+pub mod os;
