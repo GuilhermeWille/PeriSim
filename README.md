@@ -19,33 +19,39 @@ Cada botão gera um **comando do terminal** (que aparece no terminal), então vo
 | Requisito | Situação |
 |---|---|
 | Cinco módulos (POP 5.01–5.05) | Implementados e testados (fluxos completos + falhas) |
-| Gerador procedural reprodutível (semente + versão, 4 dificuldades) | Implementado; testado em 5 módulos × 4 níveis × 40 sementes |
+| Gerador procedural reprodutível (semente + versão, 4 dificuldades) | Implementado; versões 1.0.0 e 1.1.0 suportadas (a 1.1.0 só acrescenta extensões, o conteúdo-base de cada ID não muda) |
 | Sistema virtual de evidências (apagados, compostos, cifrados, setores ruins, fuso, OCR, metadados, hash) | Implementado; arquivos de sistema sintetizados sob demanda |
 | Terminal próprio com ajuda interna | Implementado (`ajuda`, `ajuda fs`, `ajuda rede`, `ajuda laudo`) |
-| Rede emulada coerente (DNS, WHOIS, rotas, páginas não indexadas, histórico, e‑mail com Received/SPF/DKIM, CGNAT) | Implementada; consistência verificada por testes |
+| Rede emulada coerente (DNS, WHOIS, rotas, páginas não indexadas, histórico, e‑mail com Received/SPF/DKIM/ARC, CGNAT) | Implementada; consistência verificada por testes |
+| Evidências em nuvem com autorização judicial (requisição ao provedor × captura direta, bloqueio após tentativas) | Implementadas e testadas (5.01‑D4) |
+| Cifragem integral por hardware + ordem de inicialização (BIOS) | Implementadas e testadas (5.01‑D3, gerador 1.1.0) |
+| Casos‑limite de arquivos (apagado sobrescrito, setores ilegíveis, assinatura ≠ extensão) | Implementados (5.01/5.03 D2+, gerador 1.1.0) |
 | Isolamento (sem rede, sem execução de comandos do SO) | Arquitetural; verificado por testes do código e das dependências |
 | Eventos adversos (apagamento remoto, retirada de página, limite de tentativas de senha) | Implementados |
 | Distinção apreensão × exame (5.05 gera **termo**, não laudo) | Implementada |
 | Laudo/termo revisável, exportação **PDF** (gerador próprio) e **Markdown** | Implementados; PDF validado com Poppler |
 | Destaque da expressão e ligação com a origem | Implementado (fundo amarelo no PDF, negrito no Markdown) |
-| Coerência relatório × auditoria | Implementada (heurística; ver limitações) |
-| Auditoria encadeada SHA‑256 | Implementada; adulteração detectada |
+| Coerência relatório × auditoria; laudo separa fatos observados (com fonte), limitações, hipóteses não confirmadas e procedimentos não realizados | Implementados (coerência por heurística) |
+| Auditoria encadeada SHA‑256 | Implementada (formato 2, sem ambiguidade entre campos); adulteração, remoção e reordenação detectadas |
 | Avaliação explicada + mentor adaptativo | Implementados |
-| Persistência (continuar caso, histórico, configurações) | Implementada por replay determinístico |
+| Persistência (continuar caso, histórico, configurações) | Replay determinístico; gravação atômica; ao carregar, aponta a primeira entrada de auditoria que divergiu; salvamentos da v0.3 continuam carregando |
 | Interface 3D em primeira pessoa (colisão, mira, interação) + texturas + sombras + modo 2D leve + economia de energia | Implementados |
-| Linux simulado na estação (desktop, terminal bash, arquivos, editor) | Implementado; replay do terminal reproduz a auditoria (testado) |
+| Linux simulado na estação (desktop, terminal bash, arquivos, editor com cursor) | Implementado; replay do terminal reproduz a auditoria (testado) |
+| Preparação para modelos/texturas externos (`assets/`) | Substituição de texturas PNG/TGA validada; OBJ/MTL lido e validado; inventário com SHA‑256 dos originais |
 | Regras realistas do aparelho móvel: bateria em AFU, IMEI físico × lógico, ligar/desligar | Implementadas e testadas |
 | Tela simulada do celular (FoneOS: tela bloqueada BFU/AFU, emergência/*#06#, início, mensagens, telefone, contatos, galeria com EXIF, arquivos, relógio, configurações; navegação auditada e sujeita às regras dos POPs) | Implementada e testada (9 testes). Sem teclado de desbloqueio na tela: o acesso depende do estado do aparelho, da senha documentada ou da extração |
-| **Linux** | Compilado, executado e medido (OpenGL por software, sem GPU) |
-| **Windows / macOS** | **Não testados** — o código não usa nada específico de Linux; compile nativamente (abaixo) |
+| **Linux — Ubuntu 24.04 (glibc 2.39)** | Compilado, executado, testado e medido (Xvfb + Mesa llvmpipe, sem GPU) |
+| **Linux — Ubuntu 22.04 (glibc 2.35)** | Binário executado sob Xvfb e capturas conferidas (ver docs) |
+| **Linux anterior à glibc 2.34** (ex.: Ubuntu 20.04) | **Não suportado pelo binário pronto** — compilar no próprio sistema |
+| **Windows / macOS** | **Não compilados nem testados** (o ambiente de desenvolvimento não tem acesso às ferramentas de compilação cruzada); o código não usa nada específico de Linux |
 
-**Pendências conhecidas** (não implementadas ou parciais): acesso à nuvem do caso 5.01‑D4 ainda não exposto no terminal; cifragem integral por hardware existe no motor mas não é sorteada pelo gerador; bateria do celular não se esgota com o tempo; RAID/JBOD, ordem de boot na BIOS e ARC não são modelados; o editor de texto só edita no final do campo; testes de interface são por roteiro + captura de tela (não há asserções automáticas sobre pixels).
+**Pendências conhecidas**: RAID/JBOD não é modelado (exigiria mídias compostas no sistema de evidências — mudança estrutural, deixada para decisão); o PIN do chip SIM (3 tentativas/PUK 10) consta do modelo e do manual, mas não tem comando; modelos glTF/FBX ainda não são carregados (aguardam os arquivos e a avaliação); testes de interface são por roteiro + captura de tela (sem asserções automáticas sobre pixels).
 
 ## Executar (Linux x86_64)
 
 ```bash
-tar xzf pericia-sim-0.3.1-linux-x86_64.tar.gz
-cd pericia-sim-0.3.1-linux-x86_64
+tar xzf pericia-sim-0.4.0-linux-x86_64.tar.gz
+cd pericia-sim-0.4.0-linux-x86_64
 ./pericia-sim          # rodar direto
 ./install.sh           # ou instalar no menu de aplicativos (sem sudo)
 ```
@@ -59,7 +65,7 @@ Requer apenas as bibliotecas OpenGL/X11 do sistema (presentes em qualquer deskto
 3. Na pasta do projeto:
 
 ```bash
-cargo test --workspace              # 60 testes (motor, Linux simulado, replay)
+cargo test --workspace              # 87 testes (motor, Linux simulado, celular, nuvem, extensões, replay, assets)
 cargo run --release -p pericia_app  # abre o simulador
 ```
 
@@ -75,7 +81,11 @@ No Windows e no macOS o mesmo comando gera o executável nativo (`target/release
 6. Quando achar a expressão, registre com `achei <expressão>`; no **Documento**, use *Pré‑preencher*, revise, escreva a conclusão separando fato de inferência, *Verificar coerência* e *Emitir e finalizar*.
 7. Leia a **Avaliação**: cada ponto perdido traz o motivo.
 
-Atalhos do terminal: ↑/↓ histórico, `limpar`, Ctrl+V cola.
+Atalhos do terminal: ↑/↓ histórico, `limpar`, Ctrl+V cola. No editor e nos campos do documento: setas, Home/End, Delete e clique posicionam o cursor.
+
+## Modelos 3D e texturas externos
+
+Veja `assets/LEIA-ME.md`. Resumo: texturas PNG/TGA em `assets/textures/<nome>.png` substituem as procedurais (validadas: potência de 2, até 2048 px); modelos OBJ/MTL em `assets/models/` são lidos e validados (relatório em `assets_relatorio.txt` na pasta de dados). O inventário dos arquivos recebidos sai de `cargo run --release -p pericia_core --example asset_inventory -- <pasta> <saida.md>` (somente leitura, com SHA‑256 de cada original).
 
 ## Arquivos gerados
 

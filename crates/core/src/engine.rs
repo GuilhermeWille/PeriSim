@@ -51,6 +51,8 @@ pub struct Report {
     pub exame: String,
     pub consideracoes: String,
     pub conclusao: String,
+    /// Hipóteses ainda não confirmadas pelo exame (ficam separadas da conclusão).
+    pub hipoteses: String,
     pub keyword_claim: String,
     pub keyword_source: String,
     pub submitted: bool,
@@ -65,6 +67,7 @@ impl Default for Report {
             exame: String::new(),
             consideracoes: String::new(),
             conclusao: String::new(),
+            hipoteses: String::new(),
             keyword_claim: String::new(),
             keyword_source: String::new(),
             submitted: false,
@@ -99,7 +102,20 @@ pub struct Sim {
     pub artifact_seq: u32,
     /// Último instante em que a bateria dos aparelhos foi atualizada.
     pub last_drain: i64,
+    /// Acesso à nuvem obtido: "provedor" (requisição judicial) ou "direto" (captura com credenciais).
+    pub cloud_access: Option<String>,
+    pub cloud_fails: u32,
+    pub cloud_locked: bool,
 }
+
+/// Comandos do motor (para sugestões quando há erro de digitação).
+pub const KNOWN_COMMANDS: &[&str] = &[
+    "ajuda", "caso", "itens", "item", "tempo", "notas", "custodia", "auditoria", "progresso", "fotografar", "lacre", "deslacrar", "abrir", "componente",
+    "midia", "bloqueio", "imagem", "sanitizar", "clone", "hash", "verificar-hash", "energia", "memoria", "volume", "rede", "inspecionar", "isolar",
+    "airplane", "imei", "sim", "alarmes", "carregar", "desbloquear", "extrair", "senha", "embalar", "camera", "solicitar-senhas", "tela", "etiquetar",
+    "fs", "recuperar", "expandir", "decifrar", "ocr", "dicionario", "dns", "whois", "traceroute", "navegar", "preservar", "arquivo-web", "email",
+    "conexao", "anotar", "achei", "laudo", "finalizar", "nuvem", "bios",
+];
 
 impl Sim {
     pub fn new(case: CaseFile) -> Self {
@@ -123,6 +139,9 @@ impl Sim {
             faults: vec![],
             artifact_seq: 0,
             last_drain: start,
+            cloud_access: None,
+            cloud_fails: 0,
+            cloud_locked: false,
         };
         s.audit.record(start, &s.actor, "abertura", &format!("Caso {} — {}", s.case.id, s.case.title), "sessão iniciada");
         s
@@ -142,7 +161,7 @@ impl Sim {
         self.faults.push(format!("[{}] {}", fmt_dt(self.clock, BRT), f));
     }
 
-    fn new_artifact(&mut self, kind: &str, origin: &str, hash: &str, note: &str) -> String {
+    pub(crate) fn new_artifact(&mut self, kind: &str, origin: &str, hash: &str, note: &str) -> String {
         self.artifact_seq += 1;
         let id = format!("A-{:03}", self.artifact_seq);
         self.artifacts.push(Artifact { id: id.clone(), kind: kind.into(), origin: origin.into(), hash: hash.into(), created: self.clock, note: note.into() });
@@ -158,13 +177,13 @@ impl Sim {
         for it in &mut self.case.items {
             if let Some(ph) = &mut it.phone {
                 if let Some(t) = ph.remote_wipe_at {
+                    // o comando fica pendente no serviço remoto e é entregue assim que o
+                    // aparelho voltar a ter conectividade (ligado e sem isolamento)
                     let connected = !ph.rf.isolates() && !ph.airplane && ph.boot != Boot::Desligado && !ph.battery_removed;
-                    if t <= now && !ph.wiped {
-                        if connected {
-                            ph.wiped = true;
-                            wiped.push(it.id.clone());
-                        }
+                    if t <= now && !ph.wiped && connected {
+                        ph.wiped = true;
                         ph.remote_wipe_at = None;
+                        wiped.push(it.id.clone());
                     }
                 }
             }
@@ -223,7 +242,7 @@ impl Sim {
         let toks: Vec<String> = line.split_whitespace().map(|s| s.to_string()).collect();
         let cmd = toks[0].to_lowercase();
         let a = |i: usize| toks.get(i).cloned().unwrap_or_default();
-        match cmd.as_str() {
+        let out = match cmd.as_str() {
             "ajuda" | "help" | "?" => Output::ok(tools::help(&a(1))),
             "caso" => Output::ok(tools::describe_case(self)),
             "itens" | "inventario" => Output::ok(tools::inventory(self)),
@@ -267,6 +286,8 @@ impl Sim {
             "camera" => self.cmd_camera(&a(1), &a(2)),
             "solicitar-senhas" => self.cmd_solicitar_senhas(&a(1)),
             "tela" => self.cmd_tela(&a(1), &a(2)),
+            "nuvem" => self.cmd_nuvem(&toks),
+            "bios" => self.cmd_bios(&a(1), &a(2), &a(3)),
             "etiquetar" => self.cmd_etiquetar(&a(1), &toks),
             // --- investigação (sistema de arquivos / rede) — delegado a tools
             "fs" => tools::fs(self, &toks),
@@ -289,7 +310,52 @@ impl Sim {
             "laudo" => tools::laudo(self, &toks),
             "finalizar" | "avaliar" => crate::assess::finalize(self),
             _ => Output::err(format!("Comando desconhecido: '{}'. Digite 'ajuda' para a lista de comandos.", cmd)),
+        };
+        self.explain_error(out, &cmd, &toks)
+    }
+
+    /// Torna as mensagens de erro acionáveis: diz o que faltou e quais alvos existem.
+    /// Não revela itens/mídias ainda ocultos (ex.: mídia sob o dissipador).
+    fn explain_error(&self, out: Output, cmd: &str, toks: &[String]) -> Output {
+        if out.ok {
+            return out;
         }
+        let is_sub = |t: &str| matches!(t, "conferir" | "aplicar" | "desligar" | "ligar" | "copiar" | "isolar" | "verificar" | "remover" | "listar" | "cobrir");
+        let arg = toks.iter().skip(1).find(|t| !is_sub(t)).cloned().unwrap_or_default();
+        let cmd = std::iter::once(cmd.to_string()).chain(toks.iter().skip(1).filter(|t| is_sub(t)).cloned()).collect::<Vec<_>>().join(" ");
+        let cmd = cmd.as_str();
+        let items: Vec<String> = self.case.items.iter().filter(|i| !i.hidden || i.flag("descoberto")).map(|i| i.id.clone()).collect();
+        let media: Vec<String> = self
+            .case
+            .items
+            .iter()
+            .filter(|i| !i.hidden || i.flag("descoberto"))
+            .flat_map(|i| i.media.iter().filter(move |m| !i.slots.iter().any(|s| s.media_id.as_deref() == Some(m.as_str()) && s.hidden_by.is_some())).cloned())
+            .chain(self.case.media.iter().filter(|m| m.is_work_media).map(|m| m.id.clone()))
+            .collect();
+        let t = out.text.trim();
+        if t == "Item não encontrado." {
+            let lista = if items.is_empty() { "nenhum".to_string() } else { items.join(", ") };
+            return if arg.is_empty() {
+                Output::err(format!("Faltou indicar o item: {} <item>. Itens disponíveis: {}.", cmd, lista))
+            } else {
+                Output::err(format!("Item '{}' não encontrado. Itens disponíveis: {}.", arg.to_uppercase(), lista))
+            };
+        }
+        if t == "Mídia não encontrada." {
+            let lista = if media.is_empty() { "nenhuma acessível ainda".to_string() } else { media.join(", ") };
+            return if arg.is_empty() {
+                Output::err(format!("Faltou indicar a mídia: {} <mídia>. Mídias acessíveis: {}.", cmd, lista))
+            } else {
+                Output::err(format!("Mídia '{}' não encontrada. Mídias acessíveis: {}.", arg.to_uppercase(), lista))
+            };
+        }
+        if t.starts_with("Comando desconhecido") {
+            if let Some(s) = KNOWN_COMMANDS.iter().map(|k| (crate::util::edit_distance(cmd, k), *k)).filter(|(d, _)| *d <= 2).min() {
+                return Output::err(format!("{} Você quis dizer '{}'?", t, s.1));
+            }
+        }
+        out
     }
 
     // ---- handlers físicos
@@ -470,7 +536,7 @@ impl Sim {
         let id = self.case.media[mi].id.clone();
         if self.case.media[mi].fde.is_some() {
             return Output::err(format!(
-                "A mídia {} está cifrada integralmente por hardware (dependente do equipamento). A imagem seria ilegível; use 'clone' (espelhamento mídia-para-mídia) ou decifre no equipamento de origem.",
+                "A mídia {} está cifrada integralmente por hardware (dependente do equipamento). A imagem seria ilegível fora dele.\nCaminho do POP: 'sanitizar <destino>', 'clone {0} <destino>', conferir a ordem de inicialização ('bios') e desbloquear o clone no equipamento de origem ('decifrar {0} <senha>').",
                 id
             ));
         }
@@ -498,37 +564,86 @@ impl Sim {
     }
 
     fn cmd_sanitizar(&mut self, mid: &str) -> Output {
-        let Some(mi) = self.case.media.iter().position(|m| m.id.eq_ignore_ascii_case(mid)) else {
-            // cria uma mídia de destino lógica se não existir
-            self.tick(10);
-            self.hashes.insert(format!("san:{}", mid.to_uppercase()), "ok".into());
-            self.rec("sanitizar", &mid.to_uppercase(), "mídia de destino sanitizada (zerada)");
-            return Output::ok(format!("Mídia de destino '{}' sanitizada e pronta para receber espelhamento.", mid.to_uppercase()));
-        };
+        if mid.is_empty() {
+            return Output::err("Uso: sanitizar <mídia-de-destino>  (ex.: sanitizar DEST-01). Prepara a mídia que RECEBERÁ um espelhamento.");
+        }
+        if let Some(mi) = self.case.media.iter().position(|m| m.id.eq_ignore_ascii_case(mid)) {
+            // a mídia pertence ao material questionado: sanitizá-la apagaria a evidência
+            let id = self.case.media[mi].id.clone();
+            if self.case.media[mi].is_work_media {
+                self.tick(1);
+                self.rec("sanitizar", &id, "RECUSADO — mídia de trabalho com conteúdo copiado da evidência");
+                return Output::err(format!("{} é uma mídia de trabalho que contém a cópia do volume (evidência derivada). Ela não pode ser reutilizada como destino.", id));
+            }
+            let blocked = self.write_blocked(&id);
+            self.tick(1);
+            if blocked {
+                self.rec("sanitizar", &id, "RECUSADO — mídia questionada, protegida pelo bloqueador de escrita");
+                return Output::err(format!("{} é mídia do material questionado e está atrás do bloqueador de escrita: a sanitização não foi executada. Sanitize apenas a mídia de DESTINO do espelhamento.", id));
+            }
+            self.fault(&format!("Tentativa de sanitizar a mídia questionada {} sem bloqueador de escrita (operação destrutiva sobre a evidência).", id));
+            self.rec("sanitizar", &id, "RECUSADO — mídia questionada; tentativa registrada");
+            return Output::err(format!("{} é mídia do material questionado: sanitizá-la apagaria a evidência. Operação recusada e registrada como falha de procedimento. Sanitize apenas a mídia de DESTINO.", id));
+        }
         self.tick(10);
-        self.case.media[mi].sanitized = true;
-        let id = self.case.media[mi].id.clone();
-        self.hashes.insert(format!("san:{}", id), "ok".into());
-        self.rec("sanitizar", &id, "mídia sanitizada");
-        Output::ok(format!("Mídia {} sanitizada.", id))
+        let dest = mid.to_uppercase();
+        self.hashes.insert(format!("san:{}", dest), "ok".into());
+        self.rec("sanitizar", &dest, "mídia de destino sanitizada (zerada)");
+        Output::ok(format!("Mídia de destino '{}' sanitizada e pronta para receber espelhamento.", dest))
     }
 
     fn cmd_clone(&mut self, src: &str, dst: &str) -> Output {
         let Some(mi) = self.case.media.iter().position(|m| m.id.eq_ignore_ascii_case(src)) else {
-            return Output::err("Uso: clone <mídia-origem> <destino>");
+            return Output::err("Uso: clone <mídia-origem> <mídia-destino>  (sanitize o destino antes: sanitizar <destino>)");
         };
+        if dst.is_empty() {
+            return Output::err("Informe a mídia de destino: clone <mídia-origem> <mídia-destino>. O destino deve ter sido sanitizado.");
+        }
         let id = self.case.media[mi].id.clone();
-        let dest = if dst.is_empty() { "DEST-01".to_string() } else { dst.to_uppercase() };
-        let sanitized = self.hashes.contains_key(&format!("san:{}", dest)) || self.case.media.iter().any(|m| m.id == dest && m.sanitized);
+        let dest = dst.to_uppercase();
+        if dest == id || self.case.media.iter().any(|m| m.id == dest) {
+            self.tick(1);
+            self.rec("espelhamento", &format!("{} -> {}", id, dest), "RECUSADO — destino é mídia do material questionado");
+            return Output::err(format!("O destino {} é mídia do material questionado: espelhar sobre ela destruiria a evidência. Use uma mídia de destino própria (ex.: DEST-01).", dest));
+        }
+        if let Some(host) = self.case.items.iter().find(|it| it.kind.is_computer() && it.power_on && it.media.contains(&id)) {
+            return Output::err(format!(
+                "A mídia {} está em uso no equipamento {} LIGADO. Avalie os dados voláteis, desligue e então espelhe com bloqueador.",
+                id, host.id
+            ));
+        }
+        let sanitized = self.hashes.contains_key(&format!("san:{}", dest));
         if !sanitized {
             self.fault(&format!("Espelhamento para destino '{}' não sanitizado previamente.", dest));
+        }
+        let blocked = self.write_blocked(&id);
+        if !blocked {
+            self.fault(&format!("Espelhamento da mídia {} sem bloqueador de escrita.", id));
         }
         self.tick(30);
         let h = vfs::media_hash(&self.case.media[mi]);
         let aid = self.new_artifact("clone", &id, &h, &format!("espelhamento mídia-para-mídia para {}", dest));
-        self.imaged.insert(id.clone());
+        let fde = self.case.media[mi].fde.is_some();
+        if fde {
+            // o clone carrega o conteúdo cifrado: só é legível no equipamento de origem
+            self.hashes.insert(format!("fdeclone:{}", id), dest.clone());
+        } else {
+            self.imaged.insert(id.clone());
+        }
         self.hashes.insert(format!("img:{}", id), h.clone());
-        let warn = if sanitized { "" } else { "\nAVISO: destino não sanitizado — risco de mistura de dados (registrado)." };
+        let mut warn = String::new();
+        if fde {
+            warn.push_str("\nO clone contém dados cifrados por hardware: para examiná-lo, instale-o no equipamento de origem, confira a ordem de inicialização ('bios') e desbloqueie com a senha ('decifrar <mídia> <senha>').");
+        }
+        if !sanitized {
+            warn.push_str("\nAVISO: destino não sanitizado — risco de mistura de dados (registrado).");
+        }
+        if !blocked {
+            warn.push_str("\nAVISO: feito SEM bloqueador de escrita — risco de contaminação do original (registrado).");
+        }
+        if self.case.media[mi].fde.is_none() {
+            warn.push_str("\nNota: sem cifragem dependente do equipamento, o POP prefere a cópia mídia-para-arquivo ('imagem').");
+        }
         self.rec("espelhamento", &format!("{} -> {} ({})", id, dest, aid), &format!("hash {}", &h[..16]));
         Output::ok(format!(
             "Espelhamento de {} para {} concluído ({}).\n  SHA-256: {}\nObservação: um clone de mídia cifrada por hardware só é legível no equipamento de origem.{}",
@@ -1243,6 +1358,83 @@ impl Sim {
             self.rec("palavra-chave", &claim, "não corresponde");
             Output::ok("A expressão informada não corresponde à de interesse do caso. Continue a investigação.")
         }
+    }
+
+    /// Ordem de inicialização (POP 5.01, pontos críticos): antes de ligar um equipamento
+    /// examinado com mídia de boot forense, confira na BIOS/UEFI que ele NÃO iniciará pelo
+    /// disco com o sistema instalado.
+    fn cmd_bios(&mut self, a1: &str, a2: &str, a3: &str) -> Output {
+        let (set, id, alvo) = if a1 == "ordem" { (true, a2, a3) } else { (false, a1, "") };
+        let Some(i) = self.item_mut(id) else { return Output::err("Item não encontrado.") };
+        if !self.case.items[i].kind.is_computer() {
+            return Output::err("A configuração de inicialização (BIOS/UEFI) aplica-se a computadores.");
+        }
+        let iid = self.case.items[i].id.clone();
+        let atual = self.hashes.get(&format!("bios:{}", iid)).cloned().unwrap_or_else(|| "disco".into());
+        if !set {
+            self.tick(3);
+            self.rec("bios-consultar", &iid, &format!("ordem de inicialização: {}", if atual == "forense" { "mídia forense primeiro" } else { "disco interno primeiro" }));
+            return Output::ok(format!(
+                "Configuração de inicialização de {} (acessada sem iniciar o sistema instalado):\n  1º {}\n  2º {}\nPara operar o equipamento com mídia forense: 'bios ordem {} forense'.",
+                iid,
+                if atual == "forense" { "Mídia de boot forense (USB)" } else { "Disco interno (sistema instalado)" },
+                if atual == "forense" { "Disco interno" } else { "USB" },
+                iid.to_lowercase()
+            ));
+        }
+        let novo = match alvo {
+            "forense" | "usb" => "forense",
+            "disco" | "interno" => "disco",
+            _ => return Output::err("Uso: bios <item>  |  bios ordem <item> forense|disco"),
+        };
+        self.tick(3);
+        self.hashes.insert(format!("bios:{}", iid), novo.into());
+        self.rec("bios-ordem", &iid, if novo == "forense" { "mídia forense definida como 1ª opção de inicialização" } else { "disco interno como 1ª opção" });
+        Output::ok(format!("Ordem de inicialização de {} ajustada: 1º {}.", iid, if novo == "forense" { "mídia forense" } else { "disco interno" }))
+    }
+
+    /// Desbloqueio de mídia cifrada por hardware: sobre o CLONE, no equipamento de origem.
+    pub(crate) fn unlock_fde(&mut self, mid: &str, pass: &str) -> Option<Output> {
+        let mi = self.case.media.iter().position(|m| m.id.eq_ignore_ascii_case(mid))?;
+        let enc = self.case.media[mi].fde.clone()?;
+        let id = self.case.media[mi].id.clone();
+        if self.imaged.contains(&id) {
+            return Some(Output::ok(format!("O clone de {} já está desbloqueado e disponível para exame.", id)));
+        }
+        let Some(dest) = self.hashes.get(&format!("fdeclone:{}", id)).cloned() else {
+            return Some(Output::err(format!(
+                "Não opere o disco original. Primeiro espelhe {0} para uma mídia de destino sanitizada ('sanitizar <destino>', 'clone {0} <destino>'); o desbloqueio é feito sobre o clone, no equipamento de origem.",
+                id
+            )));
+        };
+        let Some(host) = self.case.items.iter().find(|it| it.kind.is_computer() && it.media.contains(&id)).map(|it| it.id.clone()) else {
+            self.rec("decifrar", &id, "equipamento de origem indisponível");
+            return Some(Output::err("O equipamento de origem não está disponível: sem ele, o clone de um disco cifrado por hardware permanece ilegível (registre a limitação)."));
+        };
+        self.tick(10);
+        let boot_ok = self.hashes.get(&format!("bios:{}", host)).map(|v| v == "forense").unwrap_or(false);
+        if pass != enc.password {
+            self.rec("decifrar", &format!("{} (clone {} em {})", id, dest, host), "senha do disco incorreta");
+            return Some(Output::err("Senha do disco incorreta. Confira a senha constante na documentação ('senha')."));
+        }
+        if !boot_ok {
+            self.fault(&format!("O equipamento {} foi ligado com o clone sem conferir a ordem de inicialização: o sistema instalado iniciou e alterou a cópia (POP 5.01: verificar a ordem de boot na BIOS).", host));
+        }
+        self.imaged.insert(id.clone());
+        self.decrypted.insert(id.clone());
+        self.rec(
+            "decifrar",
+            &format!("{} (clone {} desbloqueado em {})", id, dest, host),
+            if boot_ok { "disco cifrado por hardware desbloqueado com a senha informada; exame sobre o clone" } else { "desbloqueado, mas o sistema instalado iniciou (cópia alterada)" },
+        );
+        Some(Output::ok(format!(
+            "Clone {} desbloqueado no equipamento {} com a senha informada{}. O conteúdo de {} está disponível para exame ('fs montar {}').\nRegistre no laudo a origem da senha e que o exame foi feito sobre o clone.",
+            dest,
+            host,
+            if boot_ok { ", inicializado pela mídia forense" } else { " — ATENÇÃO: o sistema instalado iniciou" },
+            id,
+            id
+        )))
     }
 
     /// Marca a palavra-chave como efetivamente localizada numa fonte alcançada.

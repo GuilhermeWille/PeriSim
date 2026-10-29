@@ -81,6 +81,14 @@ pub struct Ui {
     pub any_input: bool,
     back_repeat: f32,
     pub mono_w: f32,
+    /// Posição do cursor (em caracteres) de cada campo de texto multilinha.
+    cursors: std::collections::HashMap<String, usize>,
+    pub key_left: bool,
+    pub key_right: bool,
+    pub key_home: bool,
+    pub key_end: bool,
+    pub key_del: bool,
+    nav_repeat: f32,
 }
 
 impl Ui {
@@ -106,6 +114,13 @@ impl Ui {
             any_input: false,
             back_repeat: 0.0,
             mono_w: 8.0,
+            cursors: Default::default(),
+            key_left: false,
+            key_right: false,
+            key_home: false,
+            key_end: false,
+            key_del: false,
+            nav_repeat: 0.0,
         }
     }
 
@@ -139,6 +154,30 @@ impl Ui {
                 self.back_repeat = 0.04;
             }
         }
+        // setas/Delete com repetição ao manter pressionado
+        let rep = |k: KeyCode, t: &mut f32| -> bool {
+            if is_key_pressed(k) {
+                *t = 0.4;
+                true
+            } else if is_key_down(k) {
+                *t -= get_frame_time() / 3.0;
+                if *t <= 0.0 {
+                    *t = 0.035;
+                    true
+                } else {
+                    false
+                }
+            } else {
+                false
+            }
+        };
+        let mut t = self.nav_repeat;
+        self.key_left = rep(KeyCode::Left, &mut t);
+        self.key_right = rep(KeyCode::Right, &mut t);
+        self.key_del = rep(KeyCode::Delete, &mut t);
+        self.nav_repeat = t;
+        self.key_home = is_key_pressed(KeyCode::Home);
+        self.key_end = is_key_pressed(KeyCode::End);
         self.key_up = is_key_pressed(KeyCode::Up);
         self.key_down = is_key_pressed(KeyCode::Down);
         self.key_tab = is_key_pressed(KeyCode::Tab);
@@ -147,7 +186,7 @@ impl Ui {
         if self.ctrl && is_key_pressed(KeyCode::V) {
             self.paste = miniquad::window::clipboard_get();
         }
-        if self.clicked || self.wheel != 0.0 || !self.chars.is_empty() || self.key_enter || self.key_back || self.key_up || self.key_down || self.key_esc {
+        if self.clicked || self.wheel != 0.0 || !self.chars.is_empty() || self.key_enter || self.key_back || self.key_up || self.key_down || self.key_esc || self.key_left || self.key_right || self.key_del {
             self.any_input = true;
         }
         self.chars.retain(|_| true);
@@ -275,52 +314,174 @@ impl Ui {
         enter
     }
 
-    /// Área de texto multilinha simples (cursor no final; Enter = nova linha).
+    /// Quebra o texto em linhas visuais, devolvendo (início, fim) em caracteres de cada uma.
+    fn wrap_spans(&self, text: &str, size: f32, f: F, maxw: f32) -> Vec<(usize, usize)> {
+        // largura acumulada por caractere (custo linear no tamanho do texto)
+        let chars: Vec<char> = text.chars().collect();
+        let mut wcache: std::collections::HashMap<char, f32> = Default::default();
+        let mut cw = |c: char| -> f32 { *wcache.entry(c).or_insert_with(|| self.measure(&c.to_string(), size, f)) };
+        let mut out = vec![];
+        let mut start = 0usize;
+        loop {
+            let lend = chars[start..].iter().position(|c| *c == '\n').map(|k| start + k).unwrap_or(chars.len());
+            let mut s = start;
+            loop {
+                let mut e = s;
+                let mut w = 0.0;
+                let mut last_space = None;
+                while e < lend {
+                    let ww = cw(chars[e]);
+                    if w + ww > maxw && e > s {
+                        break;
+                    }
+                    w += ww;
+                    if chars[e] == ' ' {
+                        last_space = Some(e);
+                    }
+                    e += 1;
+                }
+                if e < lend {
+                    if let Some(sp) = last_space.filter(|sp| *sp > s) {
+                        e = sp + 1;
+                    }
+                }
+                out.push((s, e));
+                if e >= lend {
+                    break;
+                }
+                s = e;
+            }
+            if lend >= chars.len() {
+                break;
+            }
+            start = lend + 1;
+        }
+        out
+    }
+
+    /// Área de texto multilinha com cursor: setas, Home/End, Delete, clique para posicionar,
+    /// Enter = nova linha, Ctrl+V cola.
     pub fn text_area(&mut self, id: &str, r: Rect, buf: &mut String, scroll: &mut f32) {
         let focused = self.focus.as_deref() == Some(id);
+        let size = 12.5;
+        let pad = self.s(6.0);
+        let lh = self.s(17.0);
+        let clicked_here = self.clicked && !self.click_consumed && r.contains(self.mouse);
         if self.click_in(r) {
             self.focus = Some(id.to_string());
         }
-        self.frame(r, T.term_bg, if focused { T.accent } else { T.border });
+        self.frame(r, T.term_bg, if focused || clicked_here { T.accent } else { T.border });
+        let nchars = buf.chars().count();
+        let mut cur = (*self.cursors.get(id).unwrap_or(&nchars)).min(nchars);
+        let byte = |s: &String, ci: usize| s.char_indices().nth(ci).map(|(b, _)| b).unwrap_or(s.len());
+        let mut edited = false;
         if focused {
-            for c in &self.chars {
-                buf.push(*c);
+            for c in self.chars.clone() {
+                let b = byte(buf, cur);
+                buf.insert(b, c);
+                cur += 1;
+                edited = true;
             }
-            if let Some(p) = &self.paste {
-                buf.push_str(p);
-            }
-            if self.key_back {
-                buf.pop();
+            if let Some(p) = self.paste.clone() {
+                let b = byte(buf, cur);
+                buf.insert_str(b, &p);
+                cur += p.chars().count();
+                edited = true;
             }
             if self.key_enter {
-                buf.push('\n');
+                let b = byte(buf, cur);
+                buf.insert(b, '\n');
+                cur += 1;
+                edited = true;
+            }
+            if self.key_back && cur > 0 {
+                let b = byte(buf, cur - 1);
+                buf.remove(b);
+                cur -= 1;
+                edited = true;
+            }
+            if self.key_del && cur < buf.chars().count() {
+                let b = byte(buf, cur);
+                buf.remove(b);
+                edited = true;
+            }
+            if self.key_left {
+                cur = cur.saturating_sub(1);
+            }
+            if self.key_right {
+                cur = (cur + 1).min(buf.chars().count());
             }
         }
-        let size = 12.5;
-        let pad = self.s(6.0);
-        let lines = self.wrap(buf, size, F::Reg, r.w - pad * 2.0);
-        let lh = self.s(17.0);
+        let spans = self.wrap_spans(buf, size, F::Reg, r.w - pad * 2.0);
+        let chars: Vec<char> = buf.chars().collect();
+        let row_of = |c: usize| spans.iter().rposition(|(s, _)| *s <= c).unwrap_or(0);
+        if focused {
+            let row = row_of(cur);
+            let col = cur - spans[row].0;
+            if self.key_home {
+                cur = spans[row].0;
+            }
+            if self.key_end {
+                cur = spans[row].1;
+            }
+            if self.key_up && row > 0 {
+                let (s, e) = spans[row - 1];
+                cur = (s + col).min(e);
+            }
+            if self.key_down && row + 1 < spans.len() {
+                let (s, e) = spans[row + 1];
+                cur = (s + col).min(e);
+            }
+        }
         let visible = ((r.h - pad * 2.0) / lh).floor().max(1.0) as usize;
-        let total = lines.len();
+        let total = spans.len();
         if self.hover(r) && self.wheel != 0.0 {
             *scroll = (*scroll - self.wheel.signum() * 2.0).max(0.0);
         }
-        if focused && (self.key_enter || !self.chars.is_empty() || self.paste.is_some()) {
-            *scroll = total.saturating_sub(visible) as f32;
-        }
         let maxs = total.saturating_sub(visible) as f32;
-        *scroll = scroll.min(maxs);
+        // mantém o cursor visível
+        let crow = row_of(cur);
+        if focused && (edited || self.key_up || self.key_down || self.key_left || self.key_right) {
+            if (crow as f32) < *scroll {
+                *scroll = crow as f32;
+            } else if crow >= *scroll as usize + visible {
+                *scroll = (crow + 1 - visible) as f32;
+            }
+        }
+        *scroll = scroll.min(maxs).max(0.0);
         let start = *scroll as usize;
-        for (i, l) in lines.iter().skip(start).take(visible).enumerate() {
-            self.text(l, r.x + pad, r.y + pad + lh * (i as f32 + 0.8), size, F::Reg, T.text);
+        // clique posiciona o cursor
+        if clicked_here {
+            let row = (start + ((self.mouse.y - r.y - pad) / lh).max(0.0) as usize).min(total.saturating_sub(1));
+            let (s, e) = spans[row];
+            let x = self.mouse.x - r.x - pad;
+            let mut best = e;
+            let mut w = 0.0;
+            for k in s..e {
+                let cw = self.measure(&chars[k].to_string(), size, F::Reg);
+                if w + cw / 2.0 >= x {
+                    best = k;
+                    break;
+                }
+                w += cw;
+            }
+            cur = best;
+        }
+        for (i, (s, e)) in spans.iter().skip(start).take(visible).enumerate() {
+            let l: String = chars[*s..*e].iter().collect();
+            self.text(l.trim_end_matches('\n'), r.x + pad, r.y + pad + lh * (i as f32 + 0.8), size, F::Reg, T.text);
         }
         if focused && (get_time() * 2.0) as i64 % 2 == 0 {
-            let last = lines.last().cloned().unwrap_or_default();
-            let row = (total.saturating_sub(1)).saturating_sub(start).min(visible - 1);
-            let cx = r.x + pad + self.measure(&last, size, F::Reg) + 1.0;
-            let cy = r.y + pad + lh * row as f32;
-            draw_line(cx, cy + self.s(3.0), cx, cy + lh, 1.5, T.accent);
+            let row = row_of(cur);
+            if row >= start && row < start + visible {
+                let (s, _) = spans[row];
+                let pre: String = chars[s..cur.min(chars.len())].iter().collect();
+                let cx = r.x + pad + self.measure(&pre, size, F::Reg) + 1.0;
+                let cy = r.y + pad + lh * (row - start) as f32;
+                draw_line(cx, cy + self.s(3.0), cx, cy + lh, 1.5, T.accent);
+            }
         }
+        self.cursors.insert(id.to_string(), cur);
     }
 
     pub fn wrap(&self, text: &str, size: f32, f: F, maxw: f32) -> Vec<String> {

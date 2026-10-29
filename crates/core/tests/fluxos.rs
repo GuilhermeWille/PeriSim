@@ -171,7 +171,12 @@ fn fluxo_501_d2_recuperacao_e_composto() {
 fn fluxo_501_d3_conteiner_cifrado_por_dicionario() {
     for seed in 0..25 {
         let mut s = Sim::new(generate(ModuleId::M501, 3, seed));
-        run(&mut s, &["bloqueio m-01", "imagem m-01", "fs montar m-01"]);
+        if let Some(pw) = s.case.media[0].fde.as_ref().map(|e| e.password.clone()) {
+            // gerador 1.1: parte dos casos D3 tem disco cifrado por hardware (clone + BIOS + senha)
+            run(&mut s, &["bloqueio m-01", "sanitizar dest-01", "clone m-01 dest-01", "bios ordem item-01 forense", &format!("decifrar m-01 {}", pw), "fs montar m-01"]);
+        } else {
+            run(&mut s, &["bloqueio m-01", "imagem m-01", "fs montar m-01"]);
+        }
         let user = pericia_core::content::login(s.case.suspect());
         let cont = format!("/Users/{}/Documents/backup_fotos.dat", user);
         // sem decifrar, nada do interior é legível
@@ -521,5 +526,110 @@ fn ligar_celular_fora_do_isolamento_e_falha_e_desligar_em_afu_descarta_estado() 
         assert_eq!(s.case.items[0].phone.as_ref().unwrap().boot, Boot::Bfu);
         assert!(!s.faults.iter().any(|f| f.contains("fora do isolamento")), "estava isolado");
         return;
+    }
+}
+
+#[test]
+fn comando_remoto_fica_pendente_e_chega_quando_o_aparelho_reconecta() {
+    // desligado antes do comando: nada acontece enquanto estiver sem conectividade
+    let mut s = Sim::new(generate(ModuleId::M502, 2, 5));
+    assert!(s.case.items[0].phone.as_ref().unwrap().remote_wipe_at.is_some());
+    s.exec("energia desligar item-01");
+    for _ in 0..40 {
+        s.exec("fotografar item-01");
+    }
+    assert!(!s.case.items[0].phone.as_ref().unwrap().wiped);
+    assert!(s.case.items[0].phone.as_ref().unwrap().remote_wipe_at.is_some(), "o comando continua pendente");
+    // religado fora do isolamento: o comando pendente é entregue
+    s.exec("energia ligar item-01");
+    s.exec("fotografar item-01");
+    assert!(s.case.items[0].phone.as_ref().unwrap().wiped);
+
+    // isolado durante todo o exame: o comando nunca chega
+    let mut s = Sim::new(generate(ModuleId::M502, 2, 5));
+    s.exec("isolar item-01 faraday");
+    s.exec("carregar item-01");
+    for _ in 0..40 {
+        s.exec("fotografar item-01");
+    }
+    assert!(!s.case.items[0].phone.as_ref().unwrap().wiped);
+}
+
+#[test]
+fn sanitizar_midia_questionada_e_recusado_e_registrado() {
+    let mut s = Sim::new(generate(ModuleId::M501, 2, 7));
+    // sem bloqueador: recusa + falha de procedimento
+    let o = s.exec("sanitizar m-01");
+    assert!(!o.ok);
+    assert!(s.faults.iter().any(|f| f.contains("sanitizar a mídia questionada")));
+    assert!(s.audit.entries.iter().any(|e| e.action == "sanitizar" && e.outcome.starts_with("RECUSADO")));
+    // destino próprio: permitido; clone exige destino explícito e não aceita mídia do caso
+    assert!(!s.exec("sanitizar").ok);
+    assert!(s.exec("sanitizar dest-01").ok);
+    assert!(!s.exec("clone m-01").ok);
+    assert!(!s.exec("clone m-01 m-01").ok);
+    s.exec("bloqueio m-01");
+    let o = s.exec("clone m-01 dest-01");
+    assert!(o.ok, "{}", o.text);
+    assert!(!s.faults.iter().any(|f| f.contains("Espelhamento da mídia M-01 sem bloqueador")), "{:?}", s.faults);
+}
+
+#[test]
+fn espelhamento_sem_bloqueador_e_registrado() {
+    let mut s = Sim::new(generate(ModuleId::M501, 2, 7));
+    s.exec("sanitizar dest-01");
+    assert!(s.exec("clone m-01 dest-01").ok);
+    assert!(s.faults.iter().any(|f| f.contains("Espelhamento da mídia M-01 sem bloqueador")));
+}
+
+#[test]
+fn erros_indicam_o_que_faltou_e_sugerem_comando() {
+    let mut s = Sim::new(generate(ModuleId::M501, 2, 7));
+    let o = s.exec("energia ligar");
+    assert!(o.text.contains("energia ligar <item>") && o.text.contains("ITEM-01"), "{}", o.text);
+    let o = s.exec("imagen m-01");
+    assert!(o.text.contains("'imagem'"), "{}", o.text);
+    // mídia oculta não é revelada pela mensagem de erro
+    let mut s = Sim::new(generate(ModuleId::M503, 4, 3));
+    let hidden: Vec<String> = s.case.items.iter().flat_map(|i| i.slots.iter().filter(|sl| sl.hidden_by.is_some()).filter_map(|sl| sl.media_id.clone())).collect();
+    let o = s.exec("imagem m-99");
+    for h in hidden {
+        assert!(!o.text.contains(&h), "revelou {}: {}", h, o.text);
+    }
+}
+
+#[test]
+fn relatorio_separa_fatos_hipoteses_limitacoes_e_nao_realizados() {
+    let mut s = Sim::new(generate(ModuleId::M501, 1, 7));
+    run(&mut s, &["fotografar item-01", "bloqueio m-01", "imagem m-01", "fs montar m-01"]);
+    let kw = s.case.keyword.clone();
+    s.exec(&format!("fs buscar {}", kw.split_whitespace().next().unwrap()));
+    let path = s.case.keyword_sources.iter().find_map(|k| match k { SourceRef::File { path, .. } => Some(path.clone()), _ => None }).unwrap();
+    s.exec(&format!("fs cat {}", path));
+    s.exec("laudo auto");
+    s.exec("laudo hipoteses O documento pode ter sido copiado de outra mídia.");
+    s.exec("laudo conclusao Provavelmente o investigado redigiu o documento.");
+    let txt = report::preview(&s);
+    assert!(txt.contains("FATOS OBSERVADOS") && txt.contains("[fonte:"), "{}", txt);
+    assert!(txt.contains("HIPÓTESES NÃO CONFIRMADAS"));
+    assert!(txt.contains("PROCEDIMENTOS PREVISTOS NÃO REALIZADOS") && txt.contains("Verificar o hash"));
+    let md = report::markdown(&s);
+    assert!(md.contains("Procedimentos previstos não realizados") && md.contains("Hipóteses não confirmadas"));
+    let coh = report::check_coherence(&s);
+    assert!(coh.problems.iter().any(|p| p.contains("linguagem de hipótese")), "{:?}", coh.problems);
+    // afirmar achado sem nenhum fato registrado é apontado
+    let mut v = Sim::new(generate(ModuleId::M501, 1, 7));
+    v.exec("laudo conclusao Foi localizado o documento de interesse.");
+    assert!(report::check_coherence(&v).problems.iter().any(|p| p.contains("afirma achados")));
+}
+
+#[test]
+fn termo_so_registra_senha_efetivamente_informada() {
+    for seed in 1..20 {
+        let mut s = Sim::new(generate(ModuleId::M505, 2, seed));
+        let pc = s.case.items[0].phone.as_ref().unwrap().passcode.clone();
+        assert!(!report::preview(&s).contains(&pc), "seed {}: senha não informada apareceu no termo", seed);
+        s.exec("solicitar-senhas item-01");
+        assert!(report::preview(&s).contains(&pc));
     }
 }

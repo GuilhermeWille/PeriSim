@@ -731,7 +731,9 @@ pub fn describe_type(os: &mut Os, sim: &Sim, a: &str, k: &Kind) -> String {
         }
         Kind::MFile { entry: None, .. } => "data".into(),
         Kind::MFile { entry: Some(e), .. } => {
-            if e.container {
+            if let Some(m) = e.magic {
+                m.into()
+            } else if e.container {
                 "data (alta entropia — possível contêiner cifrado)".into()
             } else if e.composite {
                 "Zip archive data, at least v2.0 to extract".into()

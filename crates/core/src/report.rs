@@ -32,7 +32,7 @@ pub fn autofill(s: &mut Sim) {
     if s.report.exame.is_empty() {
         let mut steps = vec![];
         for e in &s.audit.entries {
-            if matches!(e.action.as_str(), "aquisicao" | "espelhamento" | "extracao" | "hash" | "verificar-hash" | "recuperar" | "decifrar" | "memoria" | "preservar" | "email-cabecalho") {
+            if matches!(e.action.as_str(), "aquisicao" | "espelhamento" | "extracao" | "hash" | "verificar-hash" | "recuperar" | "decifrar" | "memoria" | "preservar" | "email-cabecalho" | "nuvem-solicitar" | "nuvem-acessar") && !e.outcome.starts_with("RECUSADO") {
                 steps.push(format!("- {}: {} ({})", fmt_dt(e.sim_time, BRT), e.detail, e.outcome));
             }
         }
@@ -57,6 +57,14 @@ pub fn autofill(s: &mut Sim) {
         if s.case.net.as_ref().map(|n| n.isps.iter().any(|i| i.cgnat)).unwrap_or(false) {
             lim.push("Em ambiente CGNAT, a atribuição de autoria exige a porta lógica de origem e o horário exato; o IP isoladamente não identifica a pessoa.".into());
         }
+        if s.case.net.as_ref().map(|n| n.cloud.is_some()).unwrap_or(false) {
+            match (s.case.legal.autorizacao_nuvem, s.cloud_access.as_deref()) {
+                (false, _) => lim.push("Há indício de conta em serviço de nuvem vinculada ao investigado; a decisão judicial não abrange a nuvem e os dados ali armazenados não foram examinados.".into()),
+                (true, None) => lim.push("Há conta em serviço de nuvem abrangida pela decisão judicial cujos dados não foram obtidos neste exame.".into()),
+                (true, Some("direto")) => lim.push("Os dados de nuvem foram obtidos por captura direta com credenciais; o acesso fica registrado no provedor e pode ter alertado o titular.".into()),
+                _ => {}
+            }
+        }
         s.report.consideracoes = lim.join(" ");
     }
     // origem da palavra-chave
@@ -66,6 +74,26 @@ pub fn autofill(s: &mut Sim) {
     if s.report.keyword_claim.is_empty() && s.keyword_found {
         s.report.keyword_claim = c.keyword.clone();
     }
+}
+
+/// Fatos observados no material, com a fonte de onde vieram (anotações com origem).
+/// São afirmações verificáveis — sem interpretação.
+pub fn observed_facts(s: &Sim) -> Vec<String> {
+    let mut v: Vec<String> = vec![];
+    for n in &s.notes {
+        if let Some(src) = &n.source {
+            let line = format!("{} — {} [fonte: {}]", fmt_dt(n.at, BRT), n.text, src.describe());
+            if !v.contains(&line) {
+                v.push(line);
+            }
+        }
+    }
+    v
+}
+
+/// Procedimentos previstos no POP que não constam na auditoria.
+pub fn not_performed(s: &Sim) -> Vec<String> {
+    crate::assess::checklist(s).into_iter().filter(|(ok, _)| !ok).map(|(_, l)| l).collect()
 }
 
 pub fn preview(s: &Sim) -> String {
@@ -92,9 +120,18 @@ fn laudo_text(s: &Sim) -> String {
     out.push_str(&format!("\n2. HISTÓRICO\n{}\n", filled(&r.historico, &c.historico)));
     out.push_str(&format!("\n3. OBJETIVO\n{}\n", filled(&r.objetivo, &c.objetivo)));
     out.push_str(&format!("\n4. MATERIAL\n{}\n", filled(&r.material, "(não preenchido — use 'laudo auto' ou 'laudo material <...>')")));
-    out.push_str(&format!("\n5. EXAME\n{}\n", filled(&r.exame, "(não preenchido)")));
+    out.push_str(&format!("\n5. EXAME (procedimentos realizados)\n{}\n", filled(&r.exame, "(não preenchido)")));
+    let facts = observed_facts(s);
+    out.push_str("\n6. RESULTADOS — FATOS OBSERVADOS\n");
+    if facts.is_empty() {
+        out.push_str("(nenhum fato registrado com fonte)\n");
+    } else {
+        for f in &facts {
+            out.push_str(&format!("- {}\n", f));
+        }
+    }
     if !c.keyword.is_empty() {
-        out.push_str("\n6. EXPRESSÃO DE INTERESSE\n");
+        out.push_str("\n7. EXPRESSÃO DE INTERESSE\n");
         if r.keyword_claim.is_empty() {
             out.push_str("(não indicada)\n");
         } else {
@@ -102,9 +139,19 @@ fn laudo_text(s: &Sim) -> String {
             out.push_str(&format!("Origem/obtenção: {}\n", filled(&r.keyword_source, "(origem não indicada)")));
         }
     }
-    out.push_str(&format!("\n7. CONSIDERAÇÕES TÉCNICAS\n{}\n", filled(&r.consideracoes, "(sem considerações adicionais)")));
-    out.push_str(&format!("\n8. CONCLUSÃO\n{}\n", filled(&r.conclusao, "(não preenchida)")));
-    out.push_str("\n9. ANEXOS\n");
+    out.push_str(&format!("\n8. CONSIDERAÇÕES TÉCNICAS E LIMITAÇÕES\n{}\n", filled(&r.consideracoes, "(sem considerações adicionais)")));
+    if !r.hipoteses.trim().is_empty() {
+        out.push_str(&format!("\n9. HIPÓTESES NÃO CONFIRMADAS\n{}\n", filled(&r.hipoteses, "")));
+    }
+    out.push_str(&format!("\n10. CONCLUSÃO\n{}\n", filled(&r.conclusao, "(não preenchida)")));
+    let np = not_performed(s);
+    if !np.is_empty() {
+        out.push_str("\nPROCEDIMENTOS PREVISTOS NÃO REALIZADOS\n");
+        for l in &np {
+            out.push_str(&format!("- {}\n", l));
+        }
+    }
+    out.push_str("\nANEXOS\n");
     for a in &s.artifacts {
         out.push_str(&format!("- {} {} (origem {}) — SHA-256 {}\n", a.id, a.kind, a.origin, a.hash));
     }
@@ -130,8 +177,11 @@ fn termo_text(s: &Sim) -> String {
                 let st = match sim.place { SimWhere::Slot => "no slot", SimWhere::Removido => "removido e afixado", SimWhere::AfixadoVerso => "afixado ao verso" };
                 out.push_str(&format!("  SIM slot {}: operadora {}, ICCID {} ({})\n", sim.slot, sim.operadora, sim.iccid, st));
             }
+            // só consta a senha que foi efetivamente informada (solicitada ao proprietário ou documentada)
             if ph.passcode_known(s) {
-                out.push_str(&format!("  Senha informada: {}\n", ph.passcode));
+                out.push_str(&format!("  Senha informada pelo proprietário: {}\n", ph.passcode));
+            } else {
+                out.push_str("  Senha: não informada\n");
             }
         }
         if let Some(seal) = &it.seal {
@@ -156,8 +206,8 @@ fn termo_text(s: &Sim) -> String {
 }
 
 impl PhoneState {
-    fn passcode_known(&self, _s: &Sim) -> bool {
-        self.boot == Boot::Desbloqueado || self.lock == "nenhum" || !self.passcode.is_empty()
+    fn passcode_known(&self, s: &Sim) -> bool {
+        !self.passcode.is_empty() && self.lock != "nenhum" && s.case.provided_passwords.iter().any(|(_, p)| *p == self.passcode)
     }
 }
 
@@ -182,7 +232,17 @@ pub fn markdown(s: &Sim) -> String {
         md.push_str(&format!("## 1. Histórico\n\n{}\n\n", filled(&r.historico, &c.historico)));
         md.push_str(&format!("## 2. Objetivo\n\n{}\n\n", filled(&r.objetivo, &c.objetivo)));
         md.push_str(&format!("## 3. Material\n\n{}\n\n", filled(&r.material, "_(não preenchido)_")));
-        md.push_str(&format!("## 4. Exame\n\n{}\n\n", filled(&r.exame, "_(não preenchido)_")));
+        md.push_str(&format!("## 4. Exame (procedimentos realizados)\n\n{}\n\n", filled(&r.exame, "_(não preenchido)_")));
+        md.push_str("## Resultados — fatos observados\n\n");
+        let facts = observed_facts(s);
+        if facts.is_empty() {
+            md.push_str("_(nenhum fato registrado com fonte)_\n\n");
+        } else {
+            for f in &facts {
+                md.push_str(&format!("- {}\n", f));
+            }
+            md.push('\n');
+        }
         if !c.keyword.is_empty() {
             md.push_str("## 5. Expressão de interesse\n\n");
             if r.keyword_claim.is_empty() {
@@ -192,7 +252,10 @@ pub fn markdown(s: &Sim) -> String {
                 md.push_str(&format!("**Origem / forma de obtenção:** {}\n\n", filled(&r.keyword_source, "_(não indicada)_")));
             }
         }
-        md.push_str(&format!("## 6. Considerações técnicas\n\n{}\n\n", filled(&r.consideracoes, "_(sem considerações)_")));
+        md.push_str(&format!("## 6. Considerações técnicas e limitações\n\n{}\n\n", filled(&r.consideracoes, "_(sem considerações)_")));
+        if !r.hipoteses.trim().is_empty() {
+            md.push_str(&format!("## Hipóteses não confirmadas\n\n> {}\n\n", filled(&r.hipoteses, "").replace('\n', "\n> ")));
+        }
         md.push_str(&format!("## 7. Conclusão\n\n{}\n\n", filled(&r.conclusao, "_(não preenchida)_")));
         md.push_str("## 8. Anexos\n\n| ID | Tipo | Origem | SHA-256 |\n|---|---|---|---|\n");
         for a in &s.artifacts {
@@ -201,6 +264,14 @@ pub fn markdown(s: &Sim) -> String {
         md.push('\n');
     } else {
         md.push_str(&termo_text(s).lines().skip(8).collect::<Vec<_>>().join("\n"));
+        md.push('\n');
+    }
+    let np = not_performed(s);
+    if !np.is_empty() {
+        md.push_str("## Procedimentos previstos não realizados\n\n");
+        for l in &np {
+            md.push_str(&format!("- {}\n", l));
+        }
         md.push('\n');
     }
     md.push_str("## Registro de ações (cadeia de custódia)\n\n");
@@ -235,6 +306,16 @@ pub fn check_coherence(s: &Sim) -> Coherence {
     // conclui autoria por IP de forma categórica
     if text.contains("foi o autor") || text.contains("de autoria de") || text.contains("identifica o investigado") || text.contains("prova que") {
         problems.push("A conclusão afirma autoria de forma categórica — verifique se a evidência sustenta isso (endereço técnico ≠ pessoa).".into());
+    }
+    // hipótese apresentada como conclusão
+    let concl = r.conclusao.to_lowercase();
+    if ["provavelmente", "possivelmente", "talvez", "pode ter", "suspeita-se", "acredita-se", "é possível que"].iter().any(|w| concl.contains(w)) {
+        problems.push("A conclusão contém linguagem de hipótese ('provavelmente', 'pode ter'...). Separe o que foi verificado do que é hipótese: use o campo 'Hipóteses não confirmadas'.".into());
+    }
+    // conclusão afirma algo sem nenhum fato registrado com fonte
+    let afirma_achado = ["localiz", "foi encontrad", "foram encontrad", "constatou", "constatad", "identificou", "contém", "continha"].iter().any(|w| concl.contains(w));
+    if afirma_achado && observed_facts(s).is_empty() && !s.keyword_found {
+        problems.push("A conclusão afirma achados, mas nenhum fato observado foi registrado com a sua fonte. Fundamente a conclusão no que foi verificado.".into());
     }
     // indica expressão sem origem
     if !r.keyword_claim.is_empty() && r.keyword_source.trim().is_empty() {

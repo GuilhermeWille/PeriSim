@@ -35,6 +35,36 @@ pub enum Tex {
     Outside,
 }
 
+impl Tex {
+    /// Nome do arquivo que pode substituir a textura procedural (assets/textures/<nome>.png|.tga).
+    pub fn file_name(self) -> &'static str {
+        match self {
+            Tex::White => "branco",
+            Tex::Wood => "madeira",
+            Tex::WoodFloor => "piso_madeira",
+            Tex::Vinyl => "piso_vinilico",
+            Tex::Wall => "parede",
+            Tex::Ceiling => "forro",
+            Tex::Metal => "metal",
+            Tex::Plastic => "plastico",
+            Tex::Fabric => "tecido",
+            Tex::Mat => "manta_antiestatica",
+            Tex::Vent => "grade_ventilacao",
+            Tex::Keyboard => "teclado",
+            Tex::Label => "etiqueta",
+            Tex::Rug => "tapete",
+            Tex::Leaf => "folhagem",
+            Tex::Cardboard => "papelao",
+            Tex::Screen => "tela",
+            Tex::Desktop => "tela_desktop",
+            Tex::Concrete => "concreto",
+            Tex::Glass => "vidro",
+            Tex::Blob => "sombra_contato",
+            Tex::Outside => "vista_janela",
+        }
+    }
+}
+
 pub const ALL_TEX: [Tex; 21] = [
     Tex::White, Tex::Wood, Tex::WoodFloor, Tex::Vinyl, Tex::Wall, Tex::Ceiling, Tex::Metal, Tex::Plastic, Tex::Fabric, Tex::Mat, Tex::Vent, Tex::Keyboard, Tex::Label, Tex::Rug,
     Tex::Leaf, Tex::Cardboard, Tex::Screen, Tex::Concrete, Tex::Glass, Tex::Blob, Tex::Outside,
@@ -375,6 +405,8 @@ pub struct Renderer {
     pub screen_tex: Option<Texture2D>,
     pub quality_high: bool,
     pub depth_mat: Option<Material>,
+    /// Registro do carregamento de texturas externas (substituições aplicadas ou recusadas).
+    pub asset_log: Vec<String>,
     pub shadow_rt: Option<RenderTarget>,
     pub shadows: bool,
 }
@@ -382,9 +414,32 @@ pub struct Renderer {
 impl Renderer {
     pub fn new() -> Renderer {
         let mut tex = std::collections::HashMap::new();
+        let mut asset_log = vec![];
         for t in ALL_TEX {
+            // textura fornecida (opcional) tem prioridade; a procedural é o padrão
+            if t != Tex::Desktop {
+                match crate::assets::load_texture_override(t.file_name(), t != Tex::Blob) {
+                    Ok(Some((tx, msg))) => {
+                        asset_log.push(msg);
+                        tex.insert(t, tx);
+                        continue;
+                    }
+                    Ok(None) => {}
+                    Err(e) => asset_log.push(e),
+                }
+            }
             let px = gen(t);
             tex.insert(t, make_texture(&px, 256, 256, t != Tex::Blob));
+        }
+        asset_log.extend(crate::assets::validate_models());
+        for l in &asset_log {
+            eprintln!("[assets] {}", l);
+        }
+        if !asset_log.is_empty() {
+            // relatório fica na pasta de dados do usuário — nunca na pasta dos originais
+            let dir = crate::save::data_dir();
+            let _ = std::fs::create_dir_all(&dir);
+            let _ = std::fs::write(dir.join("assets_relatorio.txt"), asset_log.join("\n") + "\n");
         }
         let mat = load_material(
             ShaderSource::Glsl { vertex: VS, fragment: FS },
@@ -414,7 +469,7 @@ impl Renderer {
         .ok();
         let shadow_rt = render_target_ex(SHADOW_RES, SHADOW_RES, RenderTargetParams { sample_count: 1, depth: true });
         shadow_rt.texture.set_filter(FilterMode::Nearest);
-        Renderer { tex, mat, batches: vec![], screen_tex: None, quality_high: true, depth_mat, shadow_rt: Some(shadow_rt), shadows: true }
+        Renderer { tex, mat, batches: vec![], screen_tex: None, quality_high: true, depth_mat, asset_log, shadow_rt: Some(shadow_rt), shadows: true }
     }
 
     fn batch(&mut self, t: Tex) -> usize {

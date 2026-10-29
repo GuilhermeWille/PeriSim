@@ -47,6 +47,13 @@ pub fn checklist(s: &Sim) -> Vec<(bool, String)> {
             v.push((a.has("verificar-hash"), "Verificar o hash da aquisição".into()));
             v.push((s.keyword_found, "Localizar a expressão de interesse".into()));
             v.push((a.has("lacre-aplicar"), "Apor novo lacre ao material".into()));
+            if s.case.media.iter().any(|m| m.fde.is_some()) {
+                v.push((a.has("espelhamento") && a.has("bios-ordem"), "Cifragem por hardware: espelhar para destino sanitizado e conferir a ordem de inicialização antes de operar o equipamento".into()));
+            }
+            if s.case.net.as_ref().map(|n| n.cloud.is_some()).unwrap_or(false) {
+                let ok = if s.case.legal.autorizacao_nuvem { s.cloud_access.is_some() } else { !s.faults.iter().any(|f| f.contains("nuvem")) };
+                v.push((ok, "Nuvem: respeitar o alcance da autorização judicial (obter os dados se autorizado; registrar a limitação se não)".into()));
+            }
         }
         ModuleId::M502 => {
             v.push((any_item(s, "isolado_rf") || any_item(s, "modo_aviao"), "Isolar comunicações (RF/modo avião) (POP 5.02)".into()));

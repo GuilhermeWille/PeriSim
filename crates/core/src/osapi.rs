@@ -21,6 +21,8 @@ pub struct OsEntry {
     pub container: bool,
     pub composite: bool,
     pub bad_sector: bool,
+    /// Assinatura ("magic number") do conteúdo, quando difere do que a extensão sugere.
+    pub magic: Option<&'static str>,
 }
 
 impl OsEntry {
@@ -38,6 +40,7 @@ impl OsEntry {
             container: f.container.is_some(),
             composite: !f.children.is_empty(),
             bad_sector: f.bad_sector,
+            magic: if f.content.starts_with("%PDF") { Some("PDF document, version 1.7") } else { None },
         }
     }
 }

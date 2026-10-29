@@ -56,6 +56,8 @@ Móveis:          isolar <item> faraday|aluminio · airplane · sim remover · a
                  desbloquear <item> <senha> · extrair <item> fisica|fs|logica · senha
                  tela <item> inicio|mensagens|telefone|contatos|galeria|arquivos|relogio|config|imei|foto
 Coleta:          embalar · etiquetar
+Inicialização:   bios <item> · bios ordem <item> forense|disco
+Nuvem:           nuvem [status] · nuvem solicitar <conta> · nuvem acessar <conta> <senha> · nuvem ls · nuvem cat <arquivo>
 Investigação:    fs ... · recuperar · expandir · decifrar · ocr · dicionario
                  conexao · dns · whois · traceroute · navegar · preservar · arquivo-web · email · rede logs
 Relatório:       anotar <texto> · achei <expressão> · laudo ... · finalizar"
@@ -235,6 +237,9 @@ pub fn fs(s: &mut Sim, toks: &[String]) -> Output {
             let mid = toks.get(2).cloned().unwrap_or_default();
             let Some(m) = s.case.media_by_id(&mid).cloned() else { return Output::err("Mídia não encontrada.") };
             if !s.imaged.contains(&m.id) {
+                if s.hashes.contains_key(&format!("fdeclone:{}", m.id)) {
+                    return Output::err(format!("O clone de {} contém dados cifrados por hardware: desbloqueie-o no equipamento de origem ('bios ordem <item> forense', 'decifrar {} <senha>').", m.id, m.id));
+                }
                 return Output::err(format!("A mídia {} ainda não foi adquirida. Faça 'imagem {}' (ou 'extrair' no caso de móvel) antes de examinar — o exame é sobre a cópia.", m.id, m.id));
             }
             s.rec_pub("fs-montar", &m.id, "imagem disponível para exame");
@@ -496,6 +501,10 @@ pub fn expandir(s: &mut Sim, mid: &str, path: &str) -> Output {
 pub fn decifrar(s: &mut Sim, target: &str, pass: &str) -> Output {
     if pass.is_empty() {
         return Output::err("Uso: decifrar <alvo> <senha>  (alvo: caminho do contêiner, id de partição cifrada ou mídia)");
+    }
+    // disco cifrado por hardware: desbloqueio do clone no equipamento de origem
+    if let Some(o) = s.unlock_fde(target, pass) {
+        return o;
     }
     // partição cifrada de mídia (ex.: BitLocker-like) ou partição interna
     let meds: Vec<Media> = s.case.media.iter().filter(|m| s.imaged.contains(&m.id)).cloned().collect();
@@ -816,6 +825,15 @@ pub fn email(s: &mut Sim, toks: &[String]) -> Output {
     if let Some(l) = headers.lines().find(|l| l.starts_with("Authentication-Results")) {
         out.push_str(&format!("  {}\n", l));
     }
+    let arc: Vec<&str> = headers.lines().filter(|l| l.starts_with("ARC-")).collect();
+    if !arc.is_empty() {
+        out.push_str("  Cadeia ARC (registro de autenticação feito por intermediário):\n");
+        for l in &arc {
+            out.push_str(&format!("    {}\n", l));
+        }
+        out.push_str("  INTERPRETAÇÃO: a mensagem passou por um intermediário (lista/encaminhador) que a alterou; por isso o DKIM falha no destino.\n");
+        out.push_str("  A cadeia ARC registra que, no intermediário, SPF e DKIM eram válidos — confiar nisso depende de confiar no intermediário que assinou o ARC.\n");
+    }
     if headers.lines().any(|l| l.starts_with("X-Hop-Check")) {
         out.push_str("  ATENÇÃO: há inconsistência entre o IP de origem e o servidor de saída — verifique.\n");
     }
@@ -842,14 +860,15 @@ pub fn laudo(s: &mut Sim, toks: &[String]) -> Output {
         "conclusao" => { s.report.conclusao = rest; Output::ok("Campo 'conclusão' atualizado.") }
         "consideracoes" => { s.report.consideracoes = rest; Output::ok("Campo 'considerações' atualizado.") }
         "historico" => { s.report.historico = rest; Output::ok("Campo 'histórico' atualizado.") }
+        "hipoteses" => { s.report.hipoteses = rest; Output::ok("Hipóteses registradas (aparecem separadas da conclusão, como não confirmadas).") }
         "auto" => { crate::report::autofill(s); Output::ok("Campos pré-preenchidos a partir das ações e anotações. Revise com 'laudo'.") }
-        _ => Output::err("Uso: laudo [material|exame|origem|conclusao|consideracoes|historico|auto] <texto>"),
+        _ => Output::err("Uso: laudo [material|exame|origem|conclusao|consideracoes|hipoteses|historico|auto] <texto>"),
     }
 }
 
 // ----------------------------------------------------------------- apoio
 
-fn register_keyword_hit(s: &mut Sim, src: &SourceRef, where_desc: &str) {
+pub(crate) fn register_keyword_hit(s: &mut Sim, src: &SourceRef, where_desc: &str) {
     let is_target = s.case.keyword_sources.iter().any(|k| k == src) || matches!(src, SourceRef::File{..}|SourceRef::Page{..}|SourceRef::Archive{..}|SourceRef::Cloud{..}|SourceRef::Provided{..}) && where_contains_keyword(s, src);
     if is_target {
         s.mark_keyword_found(where_desc);

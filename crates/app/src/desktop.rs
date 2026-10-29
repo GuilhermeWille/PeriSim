@@ -81,7 +81,7 @@ pub const LAUDO_FIELDS: [(&str, &str); 6] = [
     ("origem", "Origem da expressão de interesse"),
     ("consideracoes", "Considerações técnicas e limitações"),
     ("conclusao", "Conclusão"),
-    ("historico", "Histórico"),
+    ("hipoteses", "Hipóteses não confirmadas (opcional)"),
 ];
 
 impl DesktopState {
@@ -471,7 +471,7 @@ fn set_page(app: &mut App, out: String) {
 pub fn load_laudo(app: &mut App) {
     if let Some(s) = &app.sim {
         let r = &s.report;
-        app.desk.laudo = [r.material.clone(), r.exame.clone(), r.keyword_source.clone(), r.consideracoes.clone(), r.conclusao.clone(), r.historico.clone()];
+        app.desk.laudo = [r.material.clone(), r.exame.clone(), r.keyword_source.clone(), r.consideracoes.clone(), r.conclusao.clone(), r.hipoteses.clone()];
         app.desk.laudo_loaded = true;
     }
 }
@@ -480,7 +480,7 @@ pub fn load_laudo(app: &mut App) {
 pub fn sync_laudo(app: &mut App) {
     let Some(s) = &app.sim else { return };
     let r = &s.report;
-    let cur = [r.material.clone(), r.exame.clone(), r.keyword_source.clone(), r.consideracoes.clone(), r.conclusao.clone(), r.historico.clone()];
+    let cur = [r.material.clone(), r.exame.clone(), r.keyword_source.clone(), r.consideracoes.clone(), r.conclusao.clone(), r.hipoteses.clone()];
     let fields = app.desk.laudo.clone();
     for (i, (k, _)) in LAUDO_FIELDS.iter().enumerate() {
         if fields[i] != cur[i] {

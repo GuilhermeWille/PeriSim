@@ -203,3 +203,19 @@ mod tests {
 pub fn stable_media_repr(m: &crate::model::Media) -> String {
     format!("MEDIA|{}|{}|{}|{}|{}|{}", m.id, m.brand, m.model, m.serial, m.capacity, m.kind.label())
 }
+
+/// Distância de edição (Levenshtein) entre duas palavras curtas.
+pub fn edit_distance(a: &str, b: &str) -> usize {
+    let a: Vec<char> = a.chars().collect();
+    let b: Vec<char> = b.chars().collect();
+    let mut prev: Vec<usize> = (0..=b.len()).collect();
+    for i in 1..=a.len() {
+        let mut cur = vec![i; b.len() + 1];
+        for j in 1..=b.len() {
+            let cost = if a[i - 1] == b[j - 1] { 0 } else { 1 };
+            cur[j] = (prev[j] + 1).min(cur[j - 1] + 1).min(prev[j - 1] + cost);
+        }
+        prev = cur;
+    }
+    prev[b.len()]
+}

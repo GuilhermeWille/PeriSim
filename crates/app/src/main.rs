@@ -5,6 +5,7 @@
 mod desktop;
 mod linuxde;
 mod save;
+mod assets;
 mod fps;
 mod phone;
 mod render;
@@ -154,12 +155,18 @@ impl App {
     }
 
     pub fn resume(&mut self) {
-        match save::load_current().map(|sg| save::replay(&sg).map(|s| (s, sg.commands))) {
-            Some(Ok(((sim, os), cmds))) => {
+        match save::load_current().map(|sg| save::replay_checked(&sg).map(|s| (s, sg.commands))) {
+            Some(Ok(((sim, os, warn), cmds))) => {
                 self.de = linuxde::LinuxDe::new();
                 self.de.os_case = sim.case.id.clone();
                 self.de.os = Some(os);
-                self.term.lines = format!("Sessão restaurada por replay de {} comando(s). Auditoria verificada.\n", cmds.len());
+                self.term.lines = format!("Sessão restaurada por replay de {} comando(s). Cadeia de auditoria íntegra.\n", cmds.len());
+                for w in &warn {
+                    self.term.lines.push_str(&format!("ATENÇÃO: {}\n", w));
+                }
+                if let Some(w) = warn.first() {
+                    self.toast(w);
+                }
                 self.sim = Some(sim);
                 self.cmdlog = cmds;
                 self.screen = Screen::Game;
@@ -264,7 +271,7 @@ fn draw_menu(app: &mut App) {
     app.menu_seed = seed;
     y += 46.0 * s;
     let start = app.ui.button_c(rect(col1.x + 16.0 * s, y, 220.0 * s, 40.0 * s), "Iniciar novo caso", Color::new(0.16, 0.45, 0.28, 1.0), true) || enter;
-    let has_save = save::load_current().is_some();
+    let has_save = save::has_current();
     let cont = app.ui.button_c(rect(col1.x + 246.0 * s, y, 220.0 * s, 40.0 * s), "Continuar caso salvo", T.panel2, has_save);
     if start {
         let txt = app.menu_seed.trim().to_string();
@@ -909,13 +916,20 @@ fn run_script(app: &mut App, sc: &mut Script) -> bool {
                 "nav" => linuxde::WinKind::Navegador,
                 "doc" => linuxde::WinKind::Documento,
                 "caso" => linuxde::WinKind::Caso,
+                "linha" => linuxde::WinKind::Linha,
+                "aval" => linuxde::WinKind::Avaliacao,
+                "evid" => linuxde::WinKind::Evidencias,
+                "custodia" => linuxde::WinKind::Custodia,
+                "manual" => linuxde::WinKind::Manual,
                 _ => linuxde::WinKind::Terminal(0),
             };
+            app.de.menu_open = false;
             linuxde::open(app, k);
         }
         "cwd" => app.de.files_cwd = arg,
         "edit" => linuxde::open_in_editor(app, &arg),
         "menuopen" => app.de.menu_open = true,
+        "menuclose" => app.de.menu_open = false,
         "phone" => {
             app.phone.close();
             app.phone.open = if arg == "off" { None } else { Some(arg.to_uppercase()) };

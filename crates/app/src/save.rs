@@ -2,7 +2,7 @@
 //! lista de comandos). Como o motor é determinístico, o estado é reconstruído por
 //! replay — o que também revalida a auditoria encadeada a cada carregamento.
 
-use pericia_core::casegen::{generate, parse_case_id, GEN_VERSION};
+use pericia_core::casegen::parse_case_id;
 use pericia_core::engine::Sim;
 use serde_json::{json, Value};
 use std::path::PathBuf;
@@ -30,20 +30,43 @@ pub struct SaveGame {
     pub case_id: String,
     pub gen_version: String,
     pub commands: Vec<String>,
+    /// Formato da cadeia de auditoria em que `audit_last_hash`/`audit_trail` foram gravados
+    /// (1 = até a v0.3.1, sem o campo no arquivo).
+    pub audit_format: u32,
+    pub audit_last_hash: Option<String>,
+    /// Prefixo (12 hex) do hash de cada entrada da auditoria, para localizar divergências.
+    pub audit_trail: Vec<String>,
+}
+
+/// Escrita atômica: grava num arquivo temporário e renomeia, para que uma queda no meio
+/// da gravação não corrompa o salvamento anterior.
+pub fn write_atomic(path: &std::path::Path, data: &[u8]) -> Result<(), String> {
+    let tmp = path.with_extension("tmp");
+    std::fs::write(&tmp, data).map_err(|e| e.to_string())?;
+    std::fs::rename(&tmp, path).map_err(|e| e.to_string())
 }
 
 pub fn save_current(sim: &Sim, commands: &[String]) -> Result<PathBuf, String> {
     let dir = data_dir().join("saves");
     ensure(&dir);
     let path = dir.join("atual.json");
+    let trail: Vec<String> = sim.audit.entries.iter().map(|e| e.hash[..12].to_string()).collect();
     let v = json!({
+        "app_version": env!("CARGO_PKG_VERSION"),
         "case_id": sim.case.id,
         "gen_version": sim.case.gen_version,
         "commands": commands,
+        "audit_format": pericia_core::audit::AUDIT_FORMAT,
         "audit_last_hash": sim.audit.last_hash(),
+        "audit_trail": trail,
     });
-    std::fs::write(&path, serde_json::to_string_pretty(&v).unwrap()).map_err(|e| e.to_string())?;
+    write_atomic(&path, serde_json::to_string_pretty(&v).unwrap().as_bytes())?;
     Ok(path)
+}
+
+/// Há um caso salvo? (consulta barata, usada a cada quadro no menu)
+pub fn has_current() -> bool {
+    data_dir().join("saves/atual.json").is_file()
 }
 
 pub fn load_current() -> Option<SaveGame> {
@@ -53,18 +76,29 @@ pub fn load_current() -> Option<SaveGame> {
         case_id: v["case_id"].as_str()?.to_string(),
         gen_version: v["gen_version"].as_str().unwrap_or("").to_string(),
         commands: v["commands"].as_array()?.iter().filter_map(|x| x.as_str().map(|s| s.to_string())).collect(),
+        audit_format: v["audit_format"].as_u64().unwrap_or(1) as u32,
+        audit_last_hash: v["audit_last_hash"].as_str().map(|s| s.to_string()),
+        audit_trail: v["audit_trail"].as_array().map(|a| a.iter().filter_map(|x| x.as_str().map(|s| s.to_string())).collect()).unwrap_or_default(),
     })
 }
 
 /// Reconstrói a simulação (e o Linux da estação) por replay. Falha se a versão do gerador mudou.
 /// Entradas do log: comandos do motor; "\u{1}sh <cwd>\t<linha>" (terminal Linux);
 /// "\u{1}wr <caminho>\t<conteúdo escapado>" (gravação pelo editor).
-pub fn replay(sg: &SaveGame) -> Result<(Sim, pericia_core::os::Os), String> {
-    if sg.gen_version != GEN_VERSION {
-        return Err(format!("Salvamento criado com o gerador v{} (atual v{}); o caso não pode ser reproduzido com fidelidade.", sg.gen_version, GEN_VERSION));
+/// Como `replay`, mas também devolve avisos de divergência entre a sessão gravada e a
+/// reproduzida (motor alterado entre versões, por exemplo). Divergência não impede o
+/// carregamento: o estado é reconstruído com as regras atuais e o aviso indica onde
+/// a reprodução se afastou do registro original.
+pub fn replay_checked(sg: &SaveGame) -> Result<(Sim, pericia_core::os::Os, Vec<String>), String> {
+    if !pericia_core::casegen::SUPPORTED_GEN_VERSIONS.contains(&sg.gen_version.as_str()) {
+        return Err(format!(
+            "Salvamento criado com o gerador v{} (suportadas: {}); o caso não pode ser reproduzido com fidelidade.",
+            sg.gen_version,
+            pericia_core::casegen::SUPPORTED_GEN_VERSIONS.join(", ")
+        ));
     }
     let (m, d, seed) = parse_case_id(&sg.case_id).ok_or("ID de caso inválido no salvamento")?;
-    let mut sim = Sim::new(generate(m, d, seed));
+    let mut sim = Sim::new(pericia_core::casegen::generate_v(m, d, seed, &sg.gen_version));
     sim.actor = "Perito(a) em treinamento".into();
     let mut os = pericia_core::os::Os::new(&sim);
     let mut sh = pericia_core::os::Shell::new(&os.home);
@@ -87,7 +121,23 @@ pub fn replay(sg: &SaveGame) -> Result<(Sim, pericia_core::os::Os), String> {
     }
     os.sync(&sim);
     sim.audit.verify().map_err(|seq| format!("Auditoria inconsistente na entrada {}", seq))?;
-    Ok((sim, os))
+    let mut warn = vec![];
+    if sg.audit_format == pericia_core::audit::AUDIT_FORMAT && !sg.audit_trail.is_empty() {
+        let now: Vec<&str> = sim.audit.entries.iter().map(|e| &e.hash[..12]).collect();
+        if let Some(k) = (0..sg.audit_trail.len().max(now.len())).find(|&k| sg.audit_trail.get(k).map(|s| s.as_str()) != now.get(k).copied()) {
+            let what = sim.audit.entries.get(k).map(|e| format!("{} — {}", e.action, e.detail)).unwrap_or_else(|| "(entrada ausente na reprodução)".into());
+            warn.push(format!(
+                "A reprodução divergiu do registro gravado a partir da entrada #{} da auditoria ({}). Gravadas: {}; reproduzidas: {}. Provável mudança de regras entre versões.",
+                k + 1, what, sg.audit_trail.len(), now.len()
+            ));
+        }
+    } else if let Some(h) = &sg.audit_last_hash {
+        let ours = if sg.audit_format <= 1 { sim.audit.last_hash_v1() } else { sim.audit.last_hash() };
+        if &ours != h {
+            warn.push(format!("A reprodução não chegou ao mesmo último registro de auditoria do salvamento (formato {}). Provável mudança de regras entre versões.", sg.audit_format));
+        }
+    }
+    Ok((sim, os, warn))
 }
 
 #[derive(Clone)]
@@ -127,7 +177,7 @@ pub fn push_history(e: HistoryEntry) {
     let mut all: Vec<Value> = std::fs::read_to_string(dir.join("historico.json")).ok().and_then(|s| serde_json::from_str::<Vec<Value>>(&s).ok()).unwrap_or_default();
     all.retain(|x| x["id"].as_str() != Some(&e.id));
     all.push(json!({"id": e.id, "module": e.module, "difficulty": e.difficulty, "score": e.score, "max": e.max, "verdict": e.verdict, "when": e.when}));
-    let _ = std::fs::write(dir.join("historico.json"), serde_json::to_string_pretty(&all).unwrap());
+    let _ = write_atomic(&dir.join("historico.json"), serde_json::to_string_pretty(&all).unwrap().as_bytes());
 }
 
 pub fn export(sim: &Sim) -> Result<(PathBuf, PathBuf), String> {
@@ -204,11 +254,52 @@ mod tests {
             sim.os_shell_audit(line, if sh.last_code == 0 { "ok" } else { "código de saída diferente de zero" });
             log.push(format!("\u{1}sh {}\t{}", cwd, line));
         }
-        let sg = super::SaveGame { case_id: id.into(), gen_version: pericia_core::casegen::GEN_VERSION.into(), commands: log };
-        let (r, ros) = super::replay(&sg).unwrap();
+        let trail: Vec<String> = sim.audit.entries.iter().map(|e| e.hash[..12].to_string()).collect();
+        let sg = super::SaveGame { case_id: id.into(), gen_version: pericia_core::casegen::GEN_VERSION.into(), commands: log.clone(), audit_format: 2, audit_last_hash: Some(sim.audit.last_hash()), audit_trail: trail.clone() };
+        let (r, ros, warn) = super::replay_checked(&sg).unwrap();
         assert_eq!(r.audit.last_hash(), sim.audit.last_hash());
+        assert!(warn.is_empty(), "{:?}", warn);
         assert!(r.keyword_found);
         assert_eq!(ros.mounts.len(), 1);
+        // salvamento cujo registro não bate com a reprodução: o aviso aponta a entrada
+        let mut bad = trail.clone();
+        bad[3] = "000000000000".into();
+        let sg2 = super::SaveGame { audit_trail: bad, ..sg };
+        let (_, _, warn) = super::replay_checked(&sg2).unwrap();
+        assert_eq!(warn.len(), 1);
+        assert!(warn[0].contains("#4"), "{}", warn[0]);
+    }
+
+    #[test]
+    fn salvamento_antigo_formato_1_e_conferido_pelo_hash_legado() {
+        use pericia_core::casegen::generate;
+        use pericia_core::model::ModuleId;
+        let log = vec!["fotografar item-01".to_string(), "lacre conferir item-01".to_string()];
+        let mut sim = pericia_core::engine::Sim::new(generate(ModuleId::M501, 1, 7));
+        sim.actor = "Perito(a) em treinamento".into();
+        for c in &log { sim.exec(c); }
+        let sg = super::SaveGame { case_id: "C501-D1-00000007".into(), gen_version: "1.0.0".into(), commands: log, audit_format: 1, audit_last_hash: Some(sim.audit.last_hash_v1()), audit_trail: vec![] };
+        let (_, _, warn) = super::replay_checked(&sg).unwrap();
+        assert!(warn.is_empty(), "{:?}", warn);
+    }
+
+    #[test]
+    fn versao_de_gerador_desconhecida_e_recusada_com_mensagem() {
+        let sg = super::SaveGame { case_id: "C501-D1-00000007".into(), gen_version: "0.9.0".into(), commands: vec![], audit_format: 2, audit_last_hash: None, audit_trail: vec![] };
+        let e = super::replay_checked(&sg).err().unwrap();
+        assert!(e.contains("0.9.0") && e.contains("suportadas"));
+    }
+
+    #[test]
+    fn gravacao_atomica_substitui_sem_deixar_temporario() {
+        let dir = std::env::temp_dir().join(format!("pericia-save-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let p = dir.join("x.json");
+        super::write_atomic(&p, b"um").unwrap();
+        super::write_atomic(&p, b"dois").unwrap();
+        assert_eq!(std::fs::read_to_string(&p).unwrap(), "dois");
+        assert!(!dir.join("x.tmp").exists());
+        let _ = std::fs::remove_dir_all(&dir);
     }
 
     #[test]

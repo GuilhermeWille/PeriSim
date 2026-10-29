@@ -13,6 +13,7 @@ pub mod casegen_disk;
 pub mod casegen_mobile;
 pub mod casegen_scene;
 pub mod casegen_net;
+pub mod casegen_ext;
 pub mod vfs;
 
 pub fn version() -> &'static str {
@@ -27,4 +28,5 @@ pub mod pdf;
 pub mod manual;
 pub mod osapi;
 pub mod phone;
+pub mod cloud;
 pub mod os;

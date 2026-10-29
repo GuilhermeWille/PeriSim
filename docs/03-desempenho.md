@@ -50,6 +50,7 @@ Observações:
 * **Carregamento sob demanda:** os ~120 mil arquivos de sistema de uma partição não existem na memória; são sintetizados a partir do índice e da semente quando listados (amostra de até 400 nomes).
 * **Persistência mínima:** o salvamento é (ID do caso, versão, lista de comandos). O estado é reconstruído por replay em ~1 ms.
 * **Renderização (v0.3):** geometria procedural *low‑poly*, um lote de malha por textura, *shader* GLSL 100 (compatível com GL 2.1/GLES 2) com iluminação por pixel (3 luzes pontuais + sol + ambiente hemisférico + especular + névoa), mapa de sombras 1024² com PCF de 5 amostras, texturas procedurais 256² com *mipmaps* geradas uma vez na inicialização. Medido no escritório em primeira pessoa, 1280×760, Mesa *llvmpipe* (sem GPU): **≈ 10,4 ms de CPU por quadro (p95 11,4 ms)** com sombras. As sombras podem ser desligadas em *Configurações*.
+* **v0.4 (28/10/2026), mesma máquina:** escritório em primeira pessoa com sombras, média 10,9 ms de CPU por quadro (p95 12,6 ms) — igual à v0.3 dentro da variação; estação com o editor aberto 2,4 ms (p95 7,8 ms); inicialização até o primeiro quadro 0,38 s; RSS máxima 186 MB (menu) a 248 MB (estação). Motor: geração de caso 0,03–0,14 ms, comando 0,06 ms, PDF 0,54 ms, replay de 14 comandos 0,80 ms. O editor passou a quebrar linhas com custo linear (largura por caractere em cache) para suportar o cursor sem degradar o quadro.
 * **Modo 2D leve** (sem cena 3D) e **economia de energia** configuráveis no menu.
 
 ## Limitações das medições

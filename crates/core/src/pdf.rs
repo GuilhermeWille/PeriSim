@@ -299,10 +299,14 @@ pub fn document_blocks(s: &Sim) -> Vec<Block> {
         }
         b.push(Block::Heading("4. MATERIAL".into()));
         b.push(Block::Para(or(&r.material, "(não preenchido)")));
-        b.push(Block::Heading("5. EXAME".into()));
+        b.push(Block::Heading("5. EXAME (PROCEDIMENTOS REALIZADOS)".into()));
         b.push(Block::Para(or(&r.exame, "(não preenchido)")));
+        b.push(Block::Heading("6. RESULTADOS — FATOS OBSERVADOS".into()));
+        let facts = crate::report::observed_facts(s);
+        b.push(Block::Para(if facts.is_empty() { "Nenhum fato registrado com fonte.".into() } else { facts.iter().map(|f| format!("- {}", f)).collect::<Vec<_>>().join("\n") }));
+        b.push(Block::Small("Fatos: o que foi verificado no material, com a fonte. Interpretações ficam nas seções seguintes.".into()));
         if !c.keyword.is_empty() {
-            b.push(Block::Heading("6. EXPRESSÃO DE INTERESSE".into()));
+            b.push(Block::Heading("7. EXPRESSÃO DE INTERESSE".into()));
             if r.keyword_claim.is_empty() {
                 b.push(Block::Para("Não indicada.".into()));
             } else {
@@ -311,9 +315,14 @@ pub fn document_blocks(s: &Sim) -> Vec<Block> {
                 b.push(Block::Small("Observação: a localização da expressão é um FATO verificado no material; a relação com pessoas é INFERÊNCIA que depende das demais evidências e limitações registradas.".into()));
             }
         }
-        b.push(Block::Heading("7. CONSIDERAÇÕES TÉCNICAS E LIMITAÇÕES".into()));
+        b.push(Block::Heading("8. CONSIDERAÇÕES TÉCNICAS E LIMITAÇÕES".into()));
         b.push(Block::Para(or(&r.consideracoes, "Sem considerações adicionais.")));
-        b.push(Block::Heading("8. CONCLUSÃO".into()));
+        if !r.hipoteses.trim().is_empty() {
+            b.push(Block::Heading("9. HIPÓTESES NÃO CONFIRMADAS".into()));
+            b.push(Block::Para(r.hipoteses.clone()));
+            b.push(Block::Small("Hipóteses não são conclusões: indicam linhas que o exame não confirmou.".into()));
+        }
+        b.push(Block::Heading("10. CONCLUSÃO".into()));
         b.push(Block::Para(or(&r.conclusao, "(não preenchida)")));
         b.push(Block::Heading("ANEXO A — REGISTRO DE HASHES (SHA-256)".into()));
         if s.artifacts.is_empty() {
@@ -338,7 +347,7 @@ pub fn document_blocks(s: &Sim) -> Vec<Block> {
     b.push(Block::Small(format!("Último elo da cadeia: {}", s.audit.last_hash())));
     let lims: Vec<String> = crate::assess::checklist(s).into_iter().filter(|(ok, _)| !ok).map(|(_, l)| format!("- {}", l)).collect();
     if !lims.is_empty() {
-        b.push(Block::Heading("PROCEDIMENTOS NÃO REALIZADOS".into()));
+        b.push(Block::Heading("PROCEDIMENTOS PREVISTOS NÃO REALIZADOS".into()));
         b.push(Block::Para(lims.join("\n")));
     }
     b

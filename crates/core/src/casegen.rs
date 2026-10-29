@@ -11,7 +11,13 @@ use crate::rng::Rng;
 use crate::util::{fmt_dt, ts, BRT};
 use std::collections::BTreeMap;
 
-pub const GEN_VERSION: &str = "1.0.0";
+pub const GEN_VERSION: &str = "1.1.0";
+/// Versões do gerador que esta compilação reproduz com fidelidade (salvamentos antigos).
+pub const SUPPORTED_GEN_VERSIONS: &[&str] = &["1.0.0", "1.1.0"];
+/// Rótulo da semente do conteúdo-base. Fica fixo entre versões para que um mesmo ID de
+/// caso mantenha o mesmo conteúdo-base; versões novas só ACRESCENTAM extensões, com
+/// sementes próprias (ver `extensions`).
+const BASE_LABEL: &str = "1.0.0";
 
 pub fn case_id(module: ModuleId, difficulty: u8, seed: u32) -> String {
     format!("C{}-D{}-{:08X}", module.code().replace('.', ""), difficulty, seed)
@@ -296,8 +302,22 @@ fn people_for(rng: &mut Rng, company_domain: &str) -> (Person, Person, Person) {
 }
 
 pub fn generate(module: ModuleId, difficulty: u8, seed: u32) -> CaseFile {
+    generate_v(module, difficulty, seed, GEN_VERSION)
+}
+
+/// Gera o caso como a versão `version` do gerador o faria (deve estar em
+/// `SUPPORTED_GEN_VERSIONS`; versões desconhecidas caem na atual).
+pub fn generate_v(module: ModuleId, difficulty: u8, seed: u32, version: &str) -> CaseFile {
+    let version = if SUPPORTED_GEN_VERSIONS.contains(&version) { version } else { GEN_VERSION };
+    let mut case = generate_base(module, difficulty, seed);
+    case.gen_version = version.to_string();
+    crate::casegen_ext::apply(&mut case, version);
+    case
+}
+
+fn generate_base(module: ModuleId, difficulty: u8, seed: u32) -> CaseFile {
     let d = difficulty.clamp(1, 4);
-    let mut rng = Rng::for_label(seed, &format!("{}|{}|{}", GEN_VERSION, module.code(), d));
+    let mut rng = Rng::for_label(seed, &format!("{}|{}|{}", BASE_LABEL, module.code(), d));
     let scenario = scenario_for(module, &mut rng);
     let company = rng.pick(COMPANIES);
     let (suspect, victim, other) = people_for(&mut rng, company.1);
