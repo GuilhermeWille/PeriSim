@@ -4,7 +4,7 @@ Esta pasta guarda os modelos 3D do Perícia Sim e recebe texturas/modelos fornec
 
 ## Modelos incluídos (gerados no Blender 5.2)
 
-`models/` traz 22 modelos OBJ/MTL gerados pelo script `tools/blender/gerar_modelos.py`; a fonte editável é `blender/modelos.blend`. Cerca de 11 600 triângulos no total.
+`models/` traz 23 modelos OBJ/MTL gerados pelo script `tools/blender/gerar_modelos.py`; a fonte editável é `blender/modelos.blend`. Cerca de 12 300 triângulos no total.
 
 | Arquivo | Onde aparece | Triângulos |
 |---|---|---|
@@ -30,6 +30,7 @@ Esta pasta guarda os modelos 3D do Perícia Sim e recebe texturas/modelos fornec
 | `hd_35` | HDs apreendidos e HDs dentro de gabinetes abertos | 190 |
 | `ssd_25` | SSDs apreendidos | 68 |
 | `pendrive` | pendrives apreendidos | 188 |
+| `tablet_perito` | tablet robusto do perito, visto em mãos (a `tela` é substituída por um material emissivo) | 714 |
 
 Para regenerar depois de editar o script: `python3 tools/blender/gerar_modelos.py assets` (com o módulo `bpy`) ou `blender --background --python tools/blender/gerar_modelos.py -- assets`. Prévias renderizadas: `python3 tools/blender/renderizar_previas.py assets <pasta>`.
 

@@ -456,6 +456,9 @@ pub struct Renderer {
     pub shadows: bool,
     /// Assinatura da geometria do último mapa de sombras: se a cena não mudou, o mapa é reaproveitado.
     shadow_sig: u64,
+    /// Objetos "em mãos" (presos à câmera): passe principal apenas — não projetam sombra
+    /// nem entram na assinatura, para não refazer o mapa de sombras a cada movimento.
+    vm_batches: Vec<(Tex, Vec<Vertex>, Vec<u16>)>,
 }
 
 impl Renderer {
@@ -520,7 +523,7 @@ impl Renderer {
         for l in &mlog {
             eprintln!("[assets] {}", l);
         }
-        Renderer { tex, mat, batches: vec![], screen_tex: None, quality_high: true, depth_mat, asset_log, models, shadow_rt: Some(shadow_rt), shadows: true, shadow_sig: 0 }
+        Renderer { tex, mat, batches: vec![], screen_tex: None, quality_high: true, depth_mat, asset_log, models, shadow_rt: Some(shadow_rt), shadows: true, shadow_sig: 0, vm_batches: vec![] }
     }
 
     fn batch(&mut self, t: Tex) -> usize {
@@ -565,6 +568,7 @@ impl Renderer {
     /// Desenha tudo: passe de profundidade (sombra) e passe principal com a câmera `main`.
     pub fn flush(&mut self, lights: &Lights, main: &Camera3D) {
         let batches = std::mem::take(&mut self.batches);
+        let vm = std::mem::take(&mut self.vm_batches);
         let mut order: Vec<usize> = (0..batches.len()).collect();
         order.sort_by_key(|&i| batches[i].1.iter().any(|v| v.color[3] < 255) as u8);
         let texture_of = |s: &Renderer, t: Tex| -> Option<Texture2D> { if t == Tex::Desktop { s.screen_tex.clone().or_else(|| s.tex.get(&Tex::Screen).cloned()) } else { s.tex.get(&t).cloned() } };
@@ -629,6 +633,12 @@ impl Renderer {
             }
             let mesh = Mesh { vertices: v.clone(), indices: idx.clone(), texture: texture_of(self, *t) };
             draw_mesh(&mesh);
+        }
+        for (t, v, idx) in vm {
+            if !idx.is_empty() {
+                let tx = texture_of(self, t);
+                draw_mesh(&Mesh { vertices: v, indices: idx, texture: tx });
+            }
         }
         gl_use_default_material();
     }
@@ -720,6 +730,36 @@ impl Renderer {
             }
         }
         self.models.insert(name.to_string(), model);
+        true
+    }
+
+    /// Desenha um modelo com transformação completa (`m`: local → mundo) como objeto em mãos:
+    /// vai para os lotes à parte (sem sombra própria, sem invalidar o mapa de sombras).
+    pub fn model_held(&mut self, name: &str, m: Mat4, over: &[(&str, M)]) -> bool {
+        let Some(model) = self.models.get(name) else { return false };
+        let nm = Mat3::from_mat4(m).inverse().transpose();
+        for part in &model.parts {
+            let mt = over.iter().find(|(k, _)| *k == part.material).map(|(_, x)| *x).unwrap_or(part.mt);
+            let k = 1.0 / mt.tile.max(0.001);
+            let w = if mt.emis { 2.0 } else { mt.spec };
+            let raw_uv = mt.tile >= 0.999 && (mt.emis || mt.t == Tex::Screen || mt.t == Tex::Desktop);
+            let col = [(mt.c.r * 255.0) as u8, (mt.c.g * 255.0) as u8, (mt.c.b * 255.0) as u8, 255];
+            for (verts, idx) in &part.chunks {
+                let i = match self.vm_batches.iter().position(|b| b.0 == mt.t && b.1.len() + verts.len() <= MAX_BATCH_VERTS && b.2.len() + idx.len() <= MAX_BATCH_INDICES) {
+                    Some(i) => i,
+                    None => {
+                        self.vm_batches.push((mt.t, Vec::with_capacity(verts.len()), Vec::with_capacity(idx.len())));
+                        self.vm_batches.len() - 1
+                    }
+                };
+                let b = &mut self.vm_batches[i];
+                let base = b.1.len() as u16;
+                for &(p, n, uv) in verts {
+                    b.1.push(Vertex { position: m.transform_point3(p), uv: if raw_uv { uv } else { uv * k }, color: col, normal: (nm * n).normalize_or_zero().extend(w) });
+                }
+                b.2.extend(idx.iter().map(|&x| base + x));
+            }
+        }
         true
     }
 

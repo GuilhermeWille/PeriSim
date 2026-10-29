@@ -48,7 +48,7 @@ impl Ctx {
     }
 }
 
-fn rrect(r: Rect, rad: f32, c: Color) {
+pub(crate) fn rrect(r: Rect, rad: f32, c: Color) {
     // sem sobreposição de primitivas, para que cores translúcidas fiquem uniformes
     let rad = rad.min(r.w / 2.0).min(r.h / 2.0).max(0.0);
     draw_rectangle(r.x + rad, r.y, r.w - 2.0 * rad, r.h, c);
@@ -101,7 +101,7 @@ fn gradient(r: Rect, top: Color, bottom: Color) {
     }
 }
 
-fn clip_text(ui: &Ui, s: &str, size: f32, f: F, maxw: f32) -> String {
+pub(crate) fn clip_text(ui: &Ui, s: &str, size: f32, f: F, maxw: f32) -> String {
     if ui.measure(s, size, f) <= maxw {
         return s.to_string();
     }

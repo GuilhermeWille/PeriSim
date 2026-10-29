@@ -9,6 +9,7 @@ mod assets;
 mod fps;
 mod phone;
 mod render;
+mod tablet;
 mod world;
 mod ui;
 
@@ -20,11 +21,16 @@ use pericia_core::model::*;
 use ui::*;
 
 fn conf() -> macroquad::conf::Conf {
+    // PERICIA_WINDOW=LxA (ex.: 1920x1080) — tamanho inicial da janela, para testar resoluções
+    let (ww, wh) = std::env::var("PERICIA_WINDOW")
+        .ok()
+        .and_then(|v| v.split_once('x').and_then(|(a, b)| Some((a.parse().ok()?, b.parse().ok()?))))
+        .unwrap_or((1280, 760));
     macroquad::conf::Conf {
         miniquad_conf: Conf {
             window_title: "Perícia Sim — Simulador de Informática Forense".into(),
-            window_width: 1280,
-            window_height: 760,
+            window_width: ww,
+            window_height: wh,
             high_dpi: false,
             sample_count: 1,
             window_resizable: true,
@@ -85,6 +91,8 @@ pub struct App {
     pub show_help_overlay: bool,
     pub de: linuxde::LinuxDe,
     pub phone: phone::PhoneUi,
+    /// Tablet do perito (missão, objeto, apoio, anotações) — tecla T na área de hardware.
+    pub tablet: tablet::TabletUi,
     /// Legenda exibida em roteiros de demonstração (gravação de vídeo).
     pub caption: Option<String>,
 }
@@ -155,6 +163,9 @@ impl App {
         self.station_zoom = false;
         self.player = fps::Player::new();
         self.player.case.clear();
+        self.phone.close();
+        let cid = self.sim.as_ref().unwrap().case.id.clone();
+        self.tablet.bind_case(&cid, true);
         let _ = save::save_current(self.sim.as_ref().unwrap(), &self.cmdlog);
         // o resumo do caso aparece primeiro no terminal
         let brief = pericia_core::tools::describe_case(self.sim.as_ref().unwrap());
@@ -175,6 +186,8 @@ impl App {
                 if let Some(w) = warn.first() {
                     self.toast(w);
                 }
+                self.phone.close();
+                self.tablet.bind_case(&sim.case.id, false);
                 self.sim = Some(sim);
                 self.cmdlog = cmds;
                 self.screen = Screen::Game;
@@ -390,7 +403,7 @@ fn top_bar(app: &mut App) -> f32 {
         app.area = Area::Station;
     }
     let mut x = w - 8.0 * s;
-    for (label, act) in [("Menu", 0), ("Terminal", 1), ("Mentor", 2)] {
+    for (label, act) in [("Menu", 0), ("Terminal", 1)] {
         let bw = app.ui.measure(label, 13.0, F::Reg) + 24.0 * s;
         x -= bw + 4.0 * s;
         if app.ui.button(rect(x, 6.0 * s, bw, h - 12.0 * s), label) {
@@ -400,12 +413,7 @@ fn top_bar(app: &mut App) -> f32 {
                     app.screen = Screen::Menu;
                     app.history = save::history();
                 }
-                1 => app.term_open = !app.term_open,
-                _ => {
-                    app.area = Area::Station;
-                    app.station_zoom = true;
-                    desktop::switch(app, DApp::Mentor);
-                }
+                _ => app.term_open = !app.term_open,
             }
         }
     }
@@ -492,6 +500,21 @@ fn item_actions(sim: &Sim, it: &Item) -> Vec<(String, String, bool)> {
 }
 
 fn hardware(app: &mut App, area: Rect) {
+    let typing = matches!(app.ui.focus.as_deref(), Some("term") | Some("pin") | Some("seed"));
+    if tablet::keys(app, typing) {
+        // tablet em mãos: a cena segue desenhada (sem o tablet 3D), sem receber entrada
+        let clicked = app.ui.clicked && !app.ui.click_consumed;
+        let wheel = app.ui.wheel;
+        app.ui.click_consumed = true;
+        app.ui.wheel = 0.0;
+        hardware_inner(app, area, true);
+        app.ui.click_consumed = !clicked;
+        app.ui.wheel = wheel;
+        app.ui.tooltip = None;
+        app.hover_label = None;
+        tablet::draw(app, area);
+        return;
+    }
     if app.phone.open.is_none() {
         hardware_inner(app, area, false);
         return;
@@ -512,9 +535,9 @@ fn hardware(app: &mut App, area: Rect) {
 fn hardware_inner(app: &mut App, area: Rect, modal: bool) {
     let s = app.ui.scale;
     let show_panel = app.selected.is_some() || app.show_help_overlay;
-    let panel_w = if show_panel { 380.0 * s } else { 0.0 };
+    let panel_w = if show_panel { 370.0 * s } else { 0.0 };
     let view = rect(area.x, area.y, area.w - panel_w, area.h);
-    let typing = modal || matches!(app.ui.focus.as_deref(), Some("term") | Some("pin") | Some("seed"));
+    let typing = modal || matches!(app.ui.focus.as_deref(), Some("term") | Some("pin") | Some("seed") | Some("tnote"));
     if !app.settings.render3d {
         // modo 2D leve: cartões clicáveis
         app.ui.panel(view, T.bg);
@@ -556,6 +579,9 @@ fn hardware_inner(app: &mut App, area: Rect, modal: bool) {
         fog: vec3(0.55, 0.57, 0.60),
         fog_den: 0.018,
     };
+    if !app.tablet.open && app.phone.open.is_none() {
+        held_tablet(&mut r, &cam);
+    }
     r.shadows = app.settings.shadows;
     r.flush(&lights, &c);
     set_default_camera();
@@ -597,7 +623,8 @@ fn hardware_inner(app: &mut App, area: Rect, modal: bool) {
         }
         let dist = (p.center - cam.position).length();
         let focus = app.selected.as_deref() == Some(p.id.as_str()) || app.hover_pick.as_deref() == Some(p.id.as_str());
-        if dist > 3.2 && !focus {
+        // tela limpa: só o objeto na mira ou o selecionado ganha rótulo
+        if !focus || modal || dist > 6.0 {
             continue;
         }
         if let Some(sp) = world::project(&cam, view, p.center + vec3(0.0, p.half.y + 0.04, 0.0)) {
@@ -632,7 +659,7 @@ fn hardware_inner(app: &mut App, area: Rect, modal: bool) {
         draw_line(cc.x, cc.y - 7.0 * s, cc.x, cc.y - 2.0 * s, 2.0, col);
         draw_line(cc.x, cc.y + 2.0 * s, cc.x, cc.y + 7.0 * s, 2.0, col);
     }
-    if let Some((t, i)) = best {
+    if let Some((t, i)) = best.filter(|_| !modal) {
         let p = &wrld.picks[i];
         let near = t <= REACH;
         let txt = if near { format!("[clique ou E]  {}", p.label) } else { format!("{}  — aproxime-se", p.label) };
@@ -673,23 +700,59 @@ fn hardware_inner(app: &mut App, area: Rect, modal: bool) {
             None => {}
         }
     }
-    // ajuda de controles e botão da lista de itens
-    let help = if app.player.captured { "WASD andar · Shift correr · mouse olhar · clique/E interagir · Tab/Esc soltar o mouse" } else { "WASD andar · Shift correr · botão direito (ou Tab) para olhar · clique/E interagir" };
-    app.ui.text(help, view.x + 10.0 * s, view.y + view.h - 10.0 * s, 10.5, F::Reg, Color::new(1.0, 1.0, 1.0, 0.8));
-    let lb = rect(view.x + view.w - 190.0 * s, view.y + 10.0 * s, 180.0 * s, 28.0 * s);
-    if app.ui.button(lb, if show_panel { "Fechar painel ▸" } else { "☰ Itens e ações" }) {
-        if show_panel {
-            app.selected = None;
-            app.show_help_overlay = false;
-        } else {
-            app.show_help_overlay = true;
-        }
+    // dica discreta (controles completos: tablet → Apoio → Controles)
+    if !modal {
+        hint_chips(app, view);
     }
     if show_panel {
         side_panel(app, rect(area.x + view.w, area.y, panel_w, area.h));
     }
 }
 
+/// Dicas discretas no canto inferior esquerdo; "T Tablet" também é clicável.
+fn hint_chips(app: &mut App, view: Rect) {
+    let s = app.ui.scale;
+    let look = if app.player.captured { ("Tab", "soltar o mouse") } else { ("Btn. dir.", "olhar") };
+    let chips = [("T", "Tablet"), ("E", "Interagir"), look];
+    let mut x = view.x + 12.0 * s;
+    let y = view.y + view.h - 30.0 * s;
+    for (k, (key, what)) in chips.iter().enumerate() {
+        let kw = app.ui.measure(key, 10.5, F::Bold) + 10.0 * s;
+        let ww = app.ui.measure(what, 10.5, F::Reg) + 10.0 * s;
+        let r = rect(x, y, kw + ww, 20.0 * s);
+        let hov = k == 0 && app.ui.hover(r);
+        draw_rectangle(r.x, r.y, r.w, r.h, Color::new(0.0, 0.0, 0.0, if hov { 0.6 } else { 0.32 }));
+        draw_rectangle_lines(r.x, r.y, kw, r.h, 1.0, Color::new(1.0, 1.0, 1.0, 0.35));
+        app.ui.text(key, r.x + 5.0 * s, r.y + 14.5 * s, 10.5, F::Bold, Color::new(1.0, 1.0, 1.0, 0.85));
+        app.ui.text(what, r.x + kw + 5.0 * s, r.y + 14.5 * s, 10.5, F::Reg, Color::new(1.0, 1.0, 1.0, 0.7));
+        if k == 0 && app.ui.click_in(r) {
+            tablet::open(app);
+        }
+        x += r.w + 6.0 * s;
+    }
+}
+
+/// Tablet do perito em mãos (canto inferior direito da visão), preso à câmera.
+fn held_tablet(r: &mut render::Renderer, cam: &Camera3D) {
+    let f = (cam.target - cam.position).normalize();
+    let rt = f.cross(vec3(0.0, 1.0, 0.0)).normalize_or_zero();
+    if rt == Vec3::ZERO {
+        return;
+    }
+    let up = rt.cross(f);
+    // tela inclinada para o perito; segurado baixo e à direita
+    let a: f32 = 1.0;
+    let n = up * a.cos() - f * a.sin();
+    let b = -f * a.cos() - up * a.sin();
+    let pos = cam.position + f * 0.42 - up * 0.32 + rt * 0.31;
+    let yaw = Mat3::from_axis_angle(n, 0.35); // gira levemente para o centro
+    let (x, y, z) = (yaw * rt, n, yaw * b);
+    let m = Mat4::from_cols(x.extend(0.0), y.extend(0.0), z.extend(0.0), pos.extend(1.0)) * Mat4::from_translation(vec3(0.0, -0.007, 0.0));
+    let tela = render::emis(render::Tex::Screen, render::rgb(70, 110, 150));
+    r.model_held("tablet_perito", m, &[("tela", tela)]);
+}
+
+/// Painel compacto de ações do objeto selecionado (o estado detalhado está no tablet).
 fn side_panel(app: &mut App, panel: Rect) {
     let s = app.ui.scale;
     app.ui.frame(panel, T.panel, T.border);
@@ -697,49 +760,59 @@ fn side_panel(app: &mut App, panel: Rect) {
     let sel = app.selected.clone().and_then(|id| sim.case.item(&id).cloned());
     let pad = 10.0 * s;
     let mut y = panel.y + pad;
+    let close_r = rect(panel.x + panel.w - pad - 26.0 * s, y, 26.0 * s, 24.0 * s);
+    if app.ui.button(close_r, "✕") {
+        app.selected = None;
+        app.show_help_overlay = false;
+        return;
+    }
     match sel {
         None => {
-            app.ui.text("Nenhum item selecionado", panel.x + pad, y + 14.0 * s, 14.0, F::Bold, T.text);
-            y += 30.0 * s;
+            app.ui.text("Local de exame", panel.x + pad, y + 16.0 * s, 14.0, F::Bold, T.text);
+            y += 34.0 * s;
             let local = sim.case.setting == Setting::Local;
             let msg = if local {
-                "Local de exame/apreensão. Documente o ambiente, reconheça e isole os equipamentos antes de intervir. Clique em um item na cena."
+                "Documente o ambiente, reconheça e isole os equipamentos antes de intervir."
             } else {
-                "Laboratório. O material chegou lacrado. Confira a documentação antes do deslacre. Clique em um item na cena."
+                "Laboratório: o material chegou lacrado; confira a documentação antes do deslacre."
             };
             for l in app.ui.wrap(msg, 12.0, F::Reg, panel.w - pad * 2.0) {
                 app.ui.text(&l, panel.x + pad, y, 12.0, F::Reg, T.dim);
                 y += 17.0 * s;
             }
             y += 8.0 * s;
-            let items: Vec<(String, String)> = sim.case.items.iter().filter(|i| !i.hidden || i.flag("descoberto")).map(|i| (i.id.clone(), i.label.clone())).collect();
-            for (id, label) in items {
-                if app.ui.button(rect(panel.x + pad, y, panel.w - pad * 2.0, 30.0 * s), &format!("{} — {}", id, label)) {
-                    app.selected = Some(id);
-                }
-                y += 34.0 * s;
-            }
-            y += 6.0 * s;
             if app.ui.button(rect(panel.x + pad, y, panel.w - pad * 2.0, 30.0 * s), "Inspecionar o local (busca minuciosa)") {
                 app.run("inspecionar local");
             }
-            y += 34.0 * s;
-            if app.ui.button(rect(panel.x + pad, y, panel.w - pad * 2.0, 30.0 * s), "Ver caso / quesitos") {
-                app.area = Area::Station;
-                app.station_zoom = true;
-                desktop::switch(app, DApp::Caso);
+            y += 36.0 * s;
+            if app.ui.button(rect(panel.x + pad, y, panel.w - pad * 2.0, 30.0 * s), "Missão e quesitos no tablet (T)") {
+                app.tablet.tab = 0;
+                tablet::open(app);
             }
         }
         Some(it) => {
-            app.ui.text(&format!("{} — {}", it.id, it.kind.label()), panel.x + pad, y + 14.0 * s, 14.0, F::Bold, T.text);
-            y += 26.0 * s;
-            // detalhes (texto do motor)
-            let detail = pericia_core::tools::item_detail(app.sim.as_mut().unwrap(), &it.id).text;
-            let dh = panel.h * 0.36;
-            let mut sc = app.panel_scroll;
-            app.ui.scroll_text(rect(panel.x + pad, y, panel.w - pad * 2.0, dh), &detail, &mut sc, 11.0, F::Mono, T.text, false);
-            app.panel_scroll = sc;
-            y += dh + 8.0 * s;
+            let title = phone::clip_text(&app.ui, &format!("{} — {}", it.id, it.label), 14.0, F::Bold, panel.w - pad * 2.0 - 32.0 * s);
+            app.ui.text(&title, panel.x + pad, y + 16.0 * s, 14.0, F::Bold, T.text);
+            y += 24.0 * s;
+            // uma linha de estado — a ficha completa (sem spoilers) fica no tablet
+            let mut st = vec![it.kind.label().to_string()];
+            if let Some(sl) = &it.seal {
+                st.push(format!("lacre {}", if sl.intact { "íntegro" } else { "rompido" }));
+            }
+            if it.kind.is_computer() {
+                st.push(if it.power_on { "LIGADO".into() } else { "desligado".into() });
+            }
+            if let Some(ph) = &it.phone {
+                st.push(format!("bateria {:.0}%", ph.battery));
+            }
+            app.ui.text(&st.join(" · "), panel.x + pad, y + 10.0 * s, 11.0, F::Reg, T.dim);
+            y += 18.0 * s;
+            if app.ui.button(rect(panel.x + pad, y, panel.w - pad * 2.0, 26.0 * s), "Estado e cuidados no tablet (T)") {
+                app.tablet.tab = 1;
+                app.tablet.item = Some(it.id.clone());
+                tablet::open(app);
+            }
+            y += 34.0 * s;
             // campo para senha/PIN (desbloqueio) quando for móvel
             if let Some(ph) = &it.phone {
                 if ph.boot != Boot::Desbloqueado && ph.boot != Boot::Desligado {
@@ -755,6 +828,8 @@ fn side_panel(app: &mut App, panel: Rect) {
                     y += 34.0 * s;
                 }
             }
+            app.ui.text("AÇÕES", panel.x + pad, y + 10.0 * s, 10.5, F::Bold, T.dim);
+            y += 16.0 * s;
             let acts = item_actions(app.sim.as_ref().unwrap(), &it);
             let bw = (panel.w - pad * 2.0 - 6.0 * s) / 2.0;
             let bh = 28.0 * s;
@@ -1016,6 +1091,45 @@ fn run_script(app: &mut App, sc: &mut Script) -> bool {
         "psub" => app.phone.sub = arg.parse().ok(),
         "ptab" => app.phone.tab = arg.parse().unwrap_or(0),
         "pemerg" => app.phone.emergency = true,
+        // tablet: "tablet missao|objeto|apoio|notas|off [item|sub]", "tnote <tag>|<texto>", "tnedit <id>", "tndel <id>"
+        "tablet" => {
+            let mut a = arg.split_whitespace();
+            match a.next().unwrap_or("") {
+                "off" => tablet::close(app),
+                t => {
+                    app.tablet.tab = match t { "objeto" => 1, "apoio" => 2, "notas" => 3, _ => 0 };
+                    if let Some(x) = a.next() {
+                        if app.tablet.tab == 1 { app.tablet.item = Some(x.to_uppercase()); } else { app.tablet.sub = x.parse().unwrap_or(0); }
+                    }
+                    app.tablet.scroll = 0.0;
+                    tablet::open(app);
+                }
+            }
+        }
+        "tscroll" => app.tablet.scroll = arg.parse().unwrap_or(0.0),
+        "tnote" => {
+            let (tag, txt) = arg.split_once('|').unwrap_or(("Observação", arg.as_str()));
+            app.tablet.new_draft();
+            app.tablet.draft_tag = tablet::TAGS.iter().position(|t| *t == tag.trim()).unwrap_or(0);
+            app.tablet.draft = txt.replace("\\n", "\n");
+            let clock = app.sim.as_ref().map(|x| x.clock).unwrap_or(0);
+            app.tablet.save_draft(clock);
+        }
+        "tndraft" => {
+            app.tablet.new_draft();
+            app.tablet.draft = arg.replace("\\n", "\n");
+        }
+        "tnedit" => {
+            let (id, txt) = arg.split_once(' ').unwrap_or((arg.as_str(), ""));
+            app.tablet.load_note(id.parse().unwrap_or(0));
+            if !txt.is_empty() {
+                app.tablet.draft = txt.to_string();
+                let clock = app.sim.as_ref().map(|x| x.clock).unwrap_or(0);
+                app.tablet.save_draft(clock);
+            }
+        }
+        "tndel" => app.tablet.delete(arg.parse().unwrap_or(0)),
+        "resume" => app.resume(),
         "menu" => {
             app.screen = Screen::Menu;
             app.history = save::history();
@@ -1063,6 +1177,7 @@ async fn main() {
         history: save::history(),
         show_help_overlay: false,
         phone: phone::PhoneUi::default(),
+        tablet: tablet::TabletUi::default(),
         caption: None,
         de: linuxde::LinuxDe::new(),
     };

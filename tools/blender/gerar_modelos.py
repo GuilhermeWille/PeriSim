@@ -559,6 +559,31 @@ def pendrive():
     return m
 
 
+def tablet_perito():
+    """Tablet robusto do perito (26 × 18 cm): moldura com cantoneiras de borracha laranja,
+    tela, câmera, alça traseira e etiqueta "PERÍCIA". Deitado: tela para cima (+Z),
+    parte superior da tela voltada para -Y (no jogo, para longe do perito ao segurar)."""
+    m = Modelo("tablet_perito")
+    w, d, h = 0.26, 0.18, 0.014
+    m.caixa((w, d, h), (0, 0, h / 2), "plastico_escuro", 0.004, segs=2)
+    for sx in (-1, 1):
+        for sy in (-1, 1):
+            m.caixa((0.04, 0.04, h + 0.004), (sx * (w / 2 - 0.016), sy * (d / 2 - 0.016), h / 2), "plastico_laranja", 0.008, segs=2)
+    m.caixa((w - 0.03, d - 0.03, 0.0008), (0, 0, h + 0.0002), "plastico_preto", 0.002)
+    f = m.tela(-(w - 0.05) / 2, (w - 0.05) / 2, -(d - 0.05) / 2, (d - 0.05) / 2, 0.0, mat="tela")
+    for v in f.verts:
+        x, z = v.co.x, v.co.z
+        v.co = Vector((x, -z, h + 0.0008))
+    f.normal_update()
+    if f.normal.z < 0:
+        f.normal_flip()
+    m.cilindro(0.003, 0.003, 0.001, (0, -d / 2 + 0.012, h + 0.0006), "vidro_lente", segs=8)
+    m.caixa((0.16, 0.035, 0.006), (0, 0.0, -0.002), "tecido_cinza", 0.002)  # alça de mão no verso
+    m.caixa((0.07, 0.02, 0.0006), (0.06, 0.05, -0.0003), "etiqueta")
+    m.caixa((0.003, 0.03, 0.005), (w / 2 + 0.0005, -0.03, h / 2), "metal_escuro", 0.001)  # botões
+    return m
+
+
 MODELOS = [
     cadeira_escritorio,
     lambda: mesa("mesa_escritorio", 1.8, 0.76, 0.8, tampo="madeira", pes="madeira_escura", pes_madeira=True),
@@ -582,6 +607,7 @@ MODELOS = [
     hd_35,
     ssd_25,
     pendrive,
+    tablet_perito,
 ]
 
 
