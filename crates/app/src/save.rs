@@ -144,23 +144,25 @@ pub struct Settings {
     pub ui_scale: f32,
     pub render3d: bool,
     pub low_power: bool,
+    pub shadows: bool,
 }
 
 pub fn load_settings() -> Settings {
-    let d = Settings { ui_scale: 1.0, render3d: true, low_power: true };
+    let d = Settings { ui_scale: 1.0, render3d: true, low_power: true, shadows: true };
     let Ok(s) = std::fs::read_to_string(data_dir().join("config.json")) else { return d };
     let Ok(v) = serde_json::from_str::<Value>(&s) else { return d };
     Settings {
         ui_scale: v["ui_scale"].as_f64().unwrap_or(1.0) as f32,
         render3d: v["render3d"].as_bool().unwrap_or(true),
         low_power: v["low_power"].as_bool().unwrap_or(true),
+        shadows: v["shadows"].as_bool().unwrap_or(true),
     }
 }
 
 pub fn save_settings(s: &Settings) {
     let dir = data_dir();
     ensure(&dir);
-    let _ = std::fs::write(dir.join("config.json"), json!({"ui_scale": s.ui_scale, "render3d": s.render3d, "low_power": s.low_power}).to_string());
+    let _ = std::fs::write(dir.join("config.json"), json!({"ui_scale": s.ui_scale, "render3d": s.render3d, "low_power": s.low_power, "shadows": s.shadows}).to_string());
 }
 
 /// Desfaz o escape usado no log de replay (\\ → \, \n → quebra de linha).

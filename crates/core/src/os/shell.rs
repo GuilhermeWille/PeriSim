@@ -261,25 +261,48 @@ fn expand_glob(os: &Os, sim: &Sim, sh: &Shell, w: &str) -> Vec<String> {
     if !w.contains('*') && !w.contains('?') {
         return vec![w.to_string()];
     }
-    let (dir, pat) = match w.rfind('/') {
-        Some(i) => (&w[..i.max(1)], &w[i + 1..]),
-        None => ("", w),
-    };
-    if dir.contains('*') || dir.contains('?') {
-        return vec![w.to_string()];
+    // expande segmento a segmento (como o bash): /a/*/b/*.txt
+    let absolute = w.starts_with('/');
+    let segs: Vec<&str> = w.split('/').filter(|x| !x.is_empty()).collect();
+    // cada candidato: (caminho exibido, caminho absoluto)
+    let mut cands: Vec<(String, String)> = vec![(if absolute { "/".into() } else { String::new() }, if absolute { "/".into() } else { sh.cwd.clone() })];
+    for (i, seg) in segs.iter().enumerate() {
+        let last = i + 1 == segs.len();
+        let mut next = vec![];
+        for (shown, abs_dir) in &cands {
+            let join = |base: &str, n: &str| -> String { if base.is_empty() { n.to_string() } else if base.ends_with('/') { format!("{}{}", base, n) } else { format!("{}/{}", base, n) } };
+            if seg.contains('*') || seg.contains('?') {
+                let Ok(entries) = os.list(sim, abs_dir) else { continue };
+                let mut names: Vec<(String, bool)> = entries
+                    .into_iter()
+                    .filter(|(n, _)| (seg.starts_with('.') || !n.starts_with('.')) && glob_match(seg, n))
+                    .map(|(n, k)| (n, k.is_dir()))
+                    .collect();
+                names.sort();
+                for (n, is_dir) in names {
+                    if !last && !is_dir {
+                        continue;
+                    }
+                    next.push((join(shown, &n), join(abs_dir, &n)));
+                }
+            } else {
+                let a = join(abs_dir, seg);
+                if last || os.kind(sim, &a).map(|k| k.is_dir()).unwrap_or(false) {
+                    next.push((join(shown, seg), a));
+                }
+            }
+        }
+        cands = next;
+        if cands.is_empty() {
+            return vec![w.to_string()];
+        }
     }
-    let abs_dir = if dir.is_empty() { sh.cwd.clone() } else if dir.starts_with('/') { dir.to_string() } else { norm(&format!("{}/{}", sh.cwd, dir)) };
-    let Ok(entries) = os.list(sim, &abs_dir) else { return vec![w.to_string()] };
-    let mut out: Vec<String> = entries
-        .into_iter()
-        .filter(|(n, _)| (pat.starts_with('.') || !n.starts_with('.')) && glob_match(pat, n))
-        .map(|(n, _)| if dir.is_empty() { n } else if dir == "/" { format!("/{}", n) } else { format!("{}/{}", dir, n) })
-        .collect();
+    let out: Vec<String> = cands.into_iter().filter(|(_, a)| os.kind(sim, a).is_some()).map(|(s, _)| s).collect();
     if out.is_empty() {
-        return vec![w.to_string()];
+        vec![w.to_string()]
+    } else {
+        out
     }
-    out.sort();
-    out
 }
 
 pub struct Out {

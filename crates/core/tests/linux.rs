@@ -109,3 +109,19 @@ fn proc_dev_e_identidade() {
     assert!(r(&mut os, &mut sim, &mut sh, "whoami").contains("perito"));
     assert!(r(&mut os, &mut sim, &mut sh, "pericia caso").contains("CASO"));
 }
+
+#[test]
+fn curinga_no_meio_do_caminho_expande_como_no_bash() {
+    let (mut os, mut sim, mut sh) = setup(ModuleId::M501, 1, 7);
+    r(&mut os, &mut sim, &mut sh, "pericia bloqueio m-01");
+    r(&mut os, &mut sim, &mut sh, "pericia imagem m-01");
+    r(&mut os, &mut sim, &mut sh, "mkdir -p /mnt/m01");
+    let cd = os.case_dir.clone();
+    r(&mut os, &mut sim, &mut sh, &format!("mount -o ro,loop {}/M-01.dd /mnt/m01", cd));
+    let o = r(&mut os, &mut sim, &mut sh, "ls /mnt/m01/Users/*/Documents");
+    assert!(o.contains("Relatorio_mensal.docx"), "{}", o);
+    let o = r(&mut os, &mut sim, &mut sh, "ls /mnt/m01/Users/*/Documents/*.docx");
+    assert!(o.contains("/mnt/m01/Users/") && o.contains(".docx"), "{}", o);
+    r(&mut os, &mut sim, &mut sh, "cd /mnt/m01/Users");
+    assert!(r(&mut os, &mut sim, &mut sh, "ls */Pictures").contains(".jpg"));
+}

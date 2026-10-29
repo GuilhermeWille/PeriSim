@@ -49,7 +49,7 @@ Observações:
 
 * **Carregamento sob demanda:** os ~120 mil arquivos de sistema de uma partição não existem na memória; são sintetizados a partir do índice e da semente quando listados (amostra de até 400 nomes).
 * **Persistência mínima:** o salvamento é (ID do caso, versão, lista de comandos). O estado é reconstruído por replay em ~1 ms.
-* **Renderização leve:** geometria procedural *low‑poly*, iluminação por face calculada na CPU (sem *shaders*, compatível com GL 2.1), lote de vértices único por quadro.
+* **Renderização (v0.3):** geometria procedural *low‑poly*, um lote de malha por textura, *shader* GLSL 100 (compatível com GL 2.1/GLES 2) com iluminação por pixel (3 luzes pontuais + sol + ambiente hemisférico + especular + névoa), mapa de sombras 1024² com PCF de 5 amostras, texturas procedurais 256² com *mipmaps* geradas uma vez na inicialização. Medido no escritório em primeira pessoa, 1280×760, Mesa *llvmpipe* (sem GPU): **≈ 10,4 ms de CPU por quadro (p95 11,4 ms)** com sombras. As sombras podem ser desligadas em *Configurações*.
 * **Modo 2D leve** (sem cena 3D) e **economia de energia** configuráveis no menu.
 
 ## Limitações das medições

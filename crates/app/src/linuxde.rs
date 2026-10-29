@@ -107,7 +107,7 @@ impl LinuxDe {
         LinuxDe {
             os: None,
             os_case: String::new(),
-            logged: false,
+            logged: true,
             pass: String::new(),
             login_msg: String::new(),
             wins: vec![],
@@ -139,7 +139,7 @@ pub fn ensure_os(app: &mut App) {
         o.sync(sim);
         app.de.os = Some(o);
         app.de.os_case = sim.case.id.clone();
-        app.de.logged = false;
+        app.de.logged = true; // estação do laboratório: sessão já aberta, sem senha
         app.de.wins.clear();
         app.de.terms.clear();
         app.de.files_cwd = "/home/perito".into();
@@ -254,6 +254,9 @@ pub fn draw(app: &mut App, area: Rect) {
     if !app.de.logged {
         login(app, area);
         return;
+    }
+    if app.de.wins.is_empty() && app.de.terms.is_empty() {
+        open(app, WinKind::Terminal(0));
     }
     let panel_h = 28.0 * s;
     let desk = Rect::new(area.x, area.y + panel_h, area.w, area.h - panel_h);

@@ -5,7 +5,9 @@
 mod desktop;
 mod linuxde;
 mod save;
-mod scene3d;
+mod fps;
+mod render;
+mod world;
 mod ui;
 
 use desktop::{DApp, DesktopState};
@@ -13,7 +15,6 @@ use macroquad::prelude::*;
 use pericia_core::casegen::{generate, parse_case_id};
 use pericia_core::engine::Sim;
 use pericia_core::model::*;
-use scene3d::*;
 use ui::*;
 
 fn conf() -> Conf {
@@ -55,7 +56,10 @@ pub struct App {
     pub sim: Option<Sim>,
     pub cmdlog: Vec<String>,
     pub term: Term,
-    pub cam: OrbitCam,
+    pub player: fps::Player,
+    pub renderer: Option<render::Renderer>,
+    pub hover_pick: Option<String>,
+    pub seat: (Vec3, f32),
     pub selected: Option<String>,
     pub hover_label: Option<String>,
     pub desk: DesktopState,
@@ -138,7 +142,8 @@ impl App {
         self.selected = None;
         self.desk = DesktopState::new();
         self.station_zoom = false;
-        self.cam = OrbitCam::new(vec3(0.0, 0.85, 0.0), 3.0);
+        self.player = fps::Player::new();
+        self.player.case.clear();
         let _ = save::save_current(self.sim.as_ref().unwrap(), &self.cmdlog);
         // o resumo do caso aparece primeiro no terminal
         let brief = pericia_core::tools::describe_case(self.sim.as_ref().unwrap());
@@ -315,6 +320,12 @@ fn draw_menu(app: &mut App) {
         save::save_settings(&app.settings);
     }
     y += 36.0 * s;
+    let rsh = rect(col2.x + 16.0 * s, y, col2.w - 32.0 * s, 30.0 * s);
+    if app.ui.button(rsh, &format!("Sombras: {}", if app.settings.shadows { "ativadas" } else { "desativadas (mais leve)" })) {
+        app.settings.shadows = !app.settings.shadows;
+        save::save_settings(&app.settings);
+    }
+    y += 36.0 * s;
     app.ui.text(&format!("Escala da interface: {:.0}%", app.settings.ui_scale * 100.0), col2.x + 16.0 * s, y + 20.0 * s, 12.5, F::Reg, T.text);
     if app.ui.button(rect(col2.x + col2.w - 110.0 * s, y, 44.0 * s, 30.0 * s), "−") {
         app.settings.ui_scale = (app.settings.ui_scale - 0.1).max(0.7);
@@ -354,7 +365,7 @@ fn top_bar(app: &mut App) -> f32 {
     app.ui.text(&format!("{} · {}", module, time), 12.0 * s, 33.0 * s, 10.5, F::Reg, T.dim);
     let tw = 190.0 * s;
     let tx = w / 2.0 - tw - 4.0 * s;
-    if app.ui.tab(rect(tx, 5.0 * s, tw, h - 10.0 * s), "▣ Área de Hardware", app.area == Area::Hardware) {
+    if app.ui.tab(rect(tx, 5.0 * s, tw, h - 10.0 * s), "▣ Ambiente (1ª pessoa)", app.area == Area::Hardware) {
         app.area = Area::Hardware;
         desktop::sync_laudo(app);
     }
@@ -464,88 +475,11 @@ fn item_actions(sim: &Sim, it: &Item) -> Vec<(String, String, bool)> {
 
 fn hardware(app: &mut App, area: Rect) {
     let s = app.ui.scale;
-    let panel_w = 380.0 * s;
+    let show_panel = app.selected.is_some() || app.show_help_overlay;
+    let panel_w = if show_panel { 380.0 * s } else { 0.0 };
     let view = rect(area.x, area.y, area.w - panel_w, area.h);
-    let panel = rect(area.x + view.w, area.y, panel_w, area.h);
-    let mut picks: Vec<Pick> = vec![];
-    let cam3 = app.cam.camera();
-    if app.settings.render3d {
-        let allow = app.ui.focus.as_deref() != Some("term") || true;
-        let moving = app.cam.update(view, app.ui.mouse, if view.contains(app.ui.mouse) { app.ui.wheel } else { 0.0 }, allow);
-        if moving {
-            app.ui.any_input = true;
-        }
-        let cam3 = app.cam.camera();
-        let sw = screen_width();
-        let sh = screen_height();
-        // viewport GL em pixels (origem embaixo)
-        let vp = (view.x as i32, (sh - view.y - view.h) as i32, view.w as i32, view.h as i32);
-        let mut c = app.cam.camera();
-        c.viewport = Some(vp);
-        c.aspect = Some(view.w / view.h);
-        set_camera(&c);
-        let mut b = Batch::new();
-        if let Some(sim) = &app.sim {
-            picks = build_hardware(&mut b, sim, app.selected.as_deref());
-        }
-        b.finish();
-        set_default_camera();
-        let _ = sw;
-        // rótulos sobre os itens
-        app.hover_label = None;
-        let (o, d) = ray(&cam3, view, app.ui.mouse);
-        let mut best: Option<(f32, usize)> = None;
-        if view.contains(app.ui.mouse) {
-            for (i, p) in picks.iter().enumerate() {
-                if let Some(t) = ray_aabb(o, d, p.center, p.half) {
-                    if best.map(|b| t < b.0).unwrap_or(true) {
-                        best = Some((t, i));
-                    }
-                }
-            }
-        }
-        for p in &picks {
-            if p.id.starts_with("ITEM") {
-                if let Some(sp) = project(&cam3, view, p.center + vec3(0.0, p.half.y + 0.05, 0.0)) {
-                    let sel = app.selected.as_deref() == Some(p.id.as_str());
-                    let txt = p.id.clone();
-                    let tw = app.ui.measure(&txt, 11.0, F::Bold) + 10.0 * s;
-                    let r = rect(sp.x - tw / 2.0, sp.y - 18.0 * s, tw, 18.0 * s);
-                    if view.contains(sp) {
-                        app.ui.frame(r, if sel { T.accent2 } else { Color::new(0.0, 0.0, 0.0, 0.6) }, if sel { T.highlight } else { T.border });
-                        app.ui.text(&txt, r.x + 5.0 * s, r.y + 13.0 * s, 11.0, F::Bold, T.text);
-                    }
-                }
-            }
-        }
-        if let Some((_, i)) = best {
-            let p = picks[i].clone();
-            app.hover_label = Some(p.label.clone());
-            if app.ui.click_in(view) {
-                if p.id == "STATION" {
-                    app.area = Area::Station;
-                    app.station_zoom = false;
-                } else if p.id.starts_with("ITEM") {
-                    app.selected = Some(p.id.clone());
-                    app.panel_scroll = 0.0;
-                    app.cam.goal_target = p.center;
-                    app.cam.goal_dist = (p.half.length() * 6.0).clamp(0.9, 2.6);
-                } else {
-                    let info = match p.id.as_str() {
-                        "TOOL-WB" => "Bloqueador de escrita: impede que a leitura altere a mídia original (POP 5.01). Use 'Bloqueador → M-xx' no painel do item.",
-                        "TOOL-CAM" => "Câmera: fixação fotográfica antes de qualquer intervenção ('Fotografar').",
-                        _ => "Embalagens antiestáticas, Faraday bag, papel-alumínio e fita de lacre numerada.",
-                    };
-                    app.toast(info);
-                }
-            }
-        } else if app.ui.click_in(view) {
-            app.selected = None;
-            app.cam.goal_target = vec3(0.0, 0.85, 0.0);
-            app.cam.goal_dist = 3.0;
-        }
-        let _ = cam3;
-    } else {
+    let typing = matches!(app.ui.focus.as_deref(), Some("term") | Some("pin") | Some("seed"));
+    if !app.settings.render3d {
         // modo 2D leve: cartões clicáveis
         app.ui.panel(view, T.bg);
         if let Some(sim) = &app.sim {
@@ -559,19 +493,165 @@ fn hardware(app: &mut App, area: Rect) {
             let r = rect(view.x + 20.0 * s, view.y + view.h - 70.0 * s, 300.0 * s, 44.0 * s);
             if app.ui.button(r, "Ir para a Estação Pericial") {
                 app.area = Area::Station;
+                app.station_zoom = true;
+            }
+        }
+        side_panel(app, rect(area.x + view.w, area.y, area.w - view.w, area.h));
+        return;
+    }
+    if app.renderer.is_none() {
+        app.renderer = Some(render::Renderer::new());
+    }
+    let Some(sim) = app.sim.as_ref() else { return };
+    let case_id = sim.case.id.clone();
+    let mut r = app.renderer.take().unwrap();
+    r.screen_tex = app.de.snapshot.clone();
+    let cam = app.player.camera(view);
+    let mut c = app.player.camera(view);
+    c.viewport = Some((view.x as i32, (screen_height() - view.y - view.h) as i32, view.w as i32, view.h as i32));
+    let wrld = world::build(&mut r, sim, app.selected.as_deref(), app.hover_pick.as_deref());
+    let lights = render::Lights {
+        cam: cam.position,
+        l: wrld.lights,
+        sun_dir: vec3(0.9, -0.35, 0.12),
+        sun: vec3(0.22, 0.24, 0.27),
+        sky: vec3(0.42, 0.44, 0.48),
+        ground: vec3(0.17, 0.16, 0.15),
+        fog: vec3(0.55, 0.57, 0.60),
+        fog_den: 0.018,
+    };
+    r.shadows = app.settings.shadows;
+    r.flush(&lights, &c);
+    set_default_camera();
+    app.renderer = Some(r);
+    app.seat = wrld.station_seat;
+    if app.player.case != case_id {
+        app.player.case = case_id;
+        app.player.place(wrld.start.0, wrld.start.1);
+    }
+    if app.player.update(&wrld, !typing, view.contains(app.ui.mouse)) {
+        app.ui.any_input = true;
+    }
+    if !typing && is_key_pressed(KeyCode::Tab) {
+        let c = !app.player.captured;
+        app.player.set_captured(c);
+    }
+    if app.player.captured && app.ui.key_esc {
+        app.player.set_captured(false);
+    }
+    // mira e seleção (alcance de braço: é preciso se aproximar)
+    let aim = if app.player.captured { view.center() } else { app.ui.mouse };
+    let (o, d) = world::ray(&cam, view, aim);
+    let mut best: Option<(f32, usize)> = None;
+    if view.contains(aim) {
+        for (i, p) in wrld.picks.iter().enumerate() {
+            if let Some(t) = world::ray_aabb(o, d, p.center, p.half) {
+                if best.map(|b| t < b.0).unwrap_or(true) {
+                    best = Some((t, i));
+                }
             }
         }
     }
-    let _ = cam3;
-    // dica de controles e rótulo sob o mouse
-    app.ui.text("Botão direito: girar · Roda: aproximar · Clique: selecionar", view.x + 10.0 * s, view.y + view.h - 10.0 * s, 10.5, F::Reg, T.dim);
-    if let Some(l) = app.hover_label.clone() {
-        let w = app.ui.measure(&l, 12.0, F::Reg) + 14.0 * s;
-        let r = rect(app.ui.mouse.x + 14.0 * s, app.ui.mouse.y + 8.0 * s, w, 22.0 * s);
-        app.ui.frame(r, Color::new(0.0, 0.0, 0.0, 0.8), T.border);
-        app.ui.text(&l, r.x + 7.0 * s, r.y + 15.0 * s, 12.0, F::Reg, T.text);
+    const REACH: f32 = 2.6;
+    app.hover_pick = best.filter(|(t, _)| *t <= REACH).map(|(_, i)| wrld.picks[i].id.clone());
+    // rótulos flutuantes dos itens próximos
+    for p in &wrld.picks {
+        if !p.id.starts_with("ITEM") {
+            continue;
+        }
+        let dist = (p.center - cam.position).length();
+        let focus = app.selected.as_deref() == Some(p.id.as_str()) || app.hover_pick.as_deref() == Some(p.id.as_str());
+        if dist > 3.2 && !focus {
+            continue;
+        }
+        if let Some(sp) = world::project(&cam, view, p.center + vec3(0.0, p.half.y + 0.04, 0.0)) {
+            if !view.contains(sp) {
+                continue;
+            }
+            let sel = app.selected.as_deref() == Some(p.id.as_str());
+            let tw = app.ui.measure(&p.id, 11.0, F::Bold) + 10.0 * s;
+            let rr = rect(sp.x - tw / 2.0, sp.y - 18.0 * s, tw, 18.0 * s);
+            app.ui.frame(rr, if sel { T.accent2 } else { Color::new(0.0, 0.0, 0.0, 0.55) }, if sel { T.highlight } else { T.border });
+            app.ui.text(&p.id, rr.x + 5.0 * s, rr.y + 13.0 * s, 11.0, F::Bold, T.text);
+        }
     }
-    side_panel(app, panel);
+    // vinheta suave nas bordas (sensação de lente)
+    let vsteps = 10;
+    for k in 0..vsteps {
+        let t = k as f32 / vsteps as f32;
+        let a = (1.0 - t) * 0.028;
+        let inset = t * 90.0 * s;
+        let c = Color::new(0.0, 0.0, 0.0, a);
+        draw_rectangle(view.x, view.y + inset, view.w, 9.0 * s, c);
+        draw_rectangle(view.x, view.y + view.h - inset - 9.0 * s, view.w, 9.0 * s, c);
+        draw_rectangle(view.x + inset, view.y, 9.0 * s, view.h, c);
+        draw_rectangle(view.x + view.w - inset - 9.0 * s, view.y, 9.0 * s, view.h, c);
+    }
+    // mira
+    let cc = view.center();
+    let col = if app.hover_pick.is_some() { T.highlight } else { Color::new(1.0, 1.0, 1.0, 0.7) };
+    if app.player.captured {
+        draw_line(cc.x - 7.0 * s, cc.y, cc.x - 2.0 * s, cc.y, 2.0, col);
+        draw_line(cc.x + 2.0 * s, cc.y, cc.x + 7.0 * s, cc.y, 2.0, col);
+        draw_line(cc.x, cc.y - 7.0 * s, cc.x, cc.y - 2.0 * s, 2.0, col);
+        draw_line(cc.x, cc.y + 2.0 * s, cc.x, cc.y + 7.0 * s, 2.0, col);
+    }
+    if let Some((t, i)) = best {
+        let p = &wrld.picks[i];
+        let near = t <= REACH;
+        let txt = if near { format!("[clique ou E]  {}", p.label) } else { format!("{}  — aproxime-se", p.label) };
+        let tw = app.ui.measure(&txt, 12.5, F::Reg) + 18.0 * s;
+        let at = if app.player.captured { vec2(cc.x - tw / 2.0, cc.y + 22.0 * s) } else { vec2(aim.x + 16.0 * s, aim.y + 10.0 * s) };
+        let rr = rect(at.x, at.y, tw, 24.0 * s);
+        app.ui.frame(rr, Color::new(0.0, 0.0, 0.0, 0.75), if near { T.highlight } else { T.border });
+        app.ui.text(&txt, rr.x + 9.0 * s, rr.y + 16.5 * s, 12.5, F::Reg, if near { T.text } else { T.dim });
+    }
+    let clicked = app.ui.click_in(view);
+    let pressed_e = !typing && is_key_pressed(KeyCode::E);
+    if clicked || pressed_e {
+        match best.filter(|(t, _)| *t <= REACH).map(|(_, i)| wrld.picks[i].clone()) {
+            Some(p) if p.id == "STATION" => {
+                app.player.set_captured(false);
+                app.area = Area::Station;
+                app.station_zoom = true;
+                app.toast("Você se sentou na estação pericial.");
+            }
+            Some(p) if p.id.starts_with("ITEM") => {
+                app.selected = Some(p.id.clone());
+                app.panel_scroll = 0.0;
+                if app.player.captured {
+                    app.player.set_captured(false);
+                }
+            }
+            Some(p) => {
+                let info = match p.id.as_str() {
+                    "TOOL-WB" => "Bloqueador de escrita: impede que a leitura altere a mídia original (POP 5.01). Use 'Bloqueador → M-xx' no painel do item.",
+                    "TOOL-CAM" => "Câmera: fixação fotográfica antes de qualquer intervenção ('Fotografar').",
+                    _ => "Embalagens antiestáticas, Faraday bag, papel-alumínio e fita de lacre numerada.",
+                };
+                app.toast(info);
+            }
+            None if clicked && !app.player.captured => {
+                app.selected = None;
+            }
+            None => {}
+        }
+    }
+    // ajuda de controles e botão da lista de itens
+    let help = if app.player.captured { "WASD andar · Shift correr · mouse olhar · clique/E interagir · Tab/Esc soltar o mouse" } else { "WASD andar · Shift correr · botão direito (ou Tab) para olhar · clique/E interagir" };
+    app.ui.text(help, view.x + 10.0 * s, view.y + view.h - 10.0 * s, 10.5, F::Reg, Color::new(1.0, 1.0, 1.0, 0.8));
+    let lb = rect(view.x + view.w - 190.0 * s, view.y + 10.0 * s, 180.0 * s, 28.0 * s);
+    if app.ui.button(lb, if show_panel { "Fechar painel ▸" } else { "☰ Itens e ações" }) {
+        if show_panel {
+            app.selected = None;
+            app.show_help_overlay = false;
+        } else {
+            app.show_help_overlay = true;
+        }
+    }
+    if show_panel {
+        side_panel(app, rect(area.x + view.w, area.y, panel_w, area.h));
+    }
 }
 
 fn side_panel(app: &mut App, panel: Rect) {
@@ -663,80 +743,21 @@ fn side_panel(app: &mut App, panel: Rect) {
 
 fn station(app: &mut App, area: Rect) {
     let s = app.ui.scale;
-    if app.station_zoom || !app.settings.render3d {
-        linuxde::draw(app, area);
-        app.de.preview_age += 1;
-        if app.settings.render3d && app.de.preview_age >= 90 {
-            app.de.preview_age = 0;
-            linuxde::capture(app, area);
-        }
-        if app.settings.render3d {
-            let r = rect(area.x + area.w - 150.0 * s, area.y + area.h - 30.0 * s, 144.0 * s, 24.0 * s);
-            if app.ui.button(r, "◄ Afastar da tela") {
-                linuxde::capture(app, area);
-                desktop::sync_laudo(app);
-                app.station_zoom = false;
-            }
-        }
-        return;
+    app.station_zoom = true;
+    linuxde::draw(app, area);
+    app.de.preview_age += 1;
+    if app.settings.render3d && app.de.preview_age >= 90 {
+        app.de.preview_age = 0;
+        linuxde::capture(app, area);
     }
-    // vista 3D da estação: o monitor mostra a área de trabalho (miniatura renderizada)
-    let tex = app.de.snapshot.clone();
-    let mk = || Camera3D { position: vec3(0.42, 1.50, 1.05), target: vec3(0.0, 1.08, -0.25), up: vec3(0., 1., 0.), fovy: 0.8, ..Default::default() };
-    let cam = mk();
-    let sh = screen_height();
-    let mut c = mk();
-    c.viewport = Some((area.x as i32, (sh - area.y - area.h) as i32, area.w as i32, area.h as i32));
-    c.aspect = Some(area.w / area.h);
-    set_camera(&c);
-    let mut b = Batch::new();
-    b.bx(vec3(0.0, -0.02, 0.0), vec3(6.0, 0.04, 6.0), rgb(70, 76, 86));
-    b.bx(vec3(0.0, 1.5, -1.0), vec3(6.0, 3.0, 0.05), rgb(150, 160, 172));
-    b.bx(vec3(0.0, 0.38, -0.2), vec3(1.6, 0.76, 0.8), rgb(60, 64, 72));
-    workstation(&mut b, vec3(0.0, 0.80, -0.2), true);
-    if let Some(sim) = &app.sim {
-        let wb_on = sim.hashes.keys().any(|k| k.starts_with("wb:"));
-        if wb_on {
-            b.bx(vec3(-0.5, 0.86, -0.15), vec3(0.03, 0.012, 0.004), rgb(60, 240, 110));
-        }
-        for (k, _) in sim.attached_media().iter().enumerate() {
-            b.bx(vec3(-0.62 - k as f32 * 0.13, 0.82, 0.0), vec3(0.1, 0.026, 0.147), rgb(150, 156, 164));
-            b.bx(vec3(-0.56 - k as f32 * 0.13, 0.81, -0.08), vec3(0.008, 0.008, 0.16), rgb(30, 30, 30));
-        }
+    let r = rect(area.x + area.w - 170.0 * s, area.y + area.h - 30.0 * s, 164.0 * s, 24.0 * s);
+    if app.ui.button(r, "◄ Levantar da estação") {
+        linuxde::capture(app, area);
+        desktop::sync_laudo(app);
+        app.area = Area::Hardware;
+        let (p, y) = app.seat;
+        app.player.place(p, y);
     }
-    b.finish();
-    if let Some(t) = tex {
-        draw_screen_quad(&t, vec3(-0.36, 0.985, -0.333), vec3(0.36, 1.385, -0.333));
-    }
-    set_default_camera();
-    let mon = project(&cam, area, vec3(0.0, 0.94, -0.33));
-    if let Some(p) = mon {
-        let r = rect(p.x - 110.0 * s, p.y, 220.0 * s, 30.0 * s);
-        if app.ui.button_c(r, "Usar a estação", T.accent2, true) {
-            app.station_zoom = true;
-        }
-    }
-    let corner_a = project(&cam, area, vec3(-0.36, 1.385, -0.333));
-    let corner_b = project(&cam, area, vec3(0.36, 0.985, -0.333));
-    if let (Some(a), Some(bb)) = (corner_a, corner_b) {
-        if app.ui.click_in(Rect::new(a.x, a.y, bb.x - a.x, bb.y - a.y)) {
-            app.station_zoom = true;
-        }
-    }
-    app.ui.text("Estação pericial (Perícia Linux) com bloqueador de escrita. Clique na tela para usar.", area.x + 16.0 * s, area.y + area.h - 16.0 * s, 12.0, F::Reg, T.dim);
-}
-
-/// Quadrilátero texturizado (tela do monitor) entre dois cantos no mesmo plano z.
-fn draw_screen_quad(t: &Texture2D, a: Vec3, b: Vec3) {
-    use macroquad::models::Vertex;
-    let v = |x: f32, y: f32, u: f32, w: f32| Vertex { position: vec3(x, y, a.z), uv: vec2(u, w), color: [255, 255, 255, 255], normal: Vec4::ZERO };
-    // a textura do render target vem invertida verticalmente
-    let mesh = Mesh {
-        vertices: vec![v(a.x, a.y, 0.0, 0.0), v(b.x, a.y, 1.0, 0.0), v(b.x, b.y, 1.0, 1.0), v(a.x, b.y, 0.0, 1.0)],
-        indices: vec![0, 1, 2, 0, 2, 3],
-        texture: Some(t.clone()),
-    };
-    draw_mesh(&mesh);
 }
 
 fn game(app: &mut App) {
@@ -806,12 +827,21 @@ fn run_script(app: &mut App, sc: &mut Script) -> bool {
         "select" => {
             app.selected = Some(arg.to_uppercase());
         }
-        "focus" => {
-            app.cam.goal_target = vec3(0.0, 0.9, 0.0);
-            app.cam.goal_dist = arg.parse().unwrap_or(2.0);
-            sc.wait = 25;
+        "pos" => {
+            let v: Vec<f32> = arg.split_whitespace().filter_map(|x| x.parse().ok()).collect();
+            if v.len() >= 2 {
+                app.player.pos = vec3(v[0], 0.0, v[1]);
+            }
+            if v.len() >= 3 {
+                app.player.yaw = v[2];
+            }
+            if v.len() >= 4 {
+                app.player.pitch = v[3];
+            }
+            app.player.case = app.sim.as_ref().map(|s| s.case.id.clone()).unwrap_or_default();
         }
-        "yaw" => app.cam.yaw = arg.parse().unwrap_or(0.0),
+        "yaw" => app.player.yaw = arg.parse().unwrap_or(0.0),
+        "pitch" => app.player.pitch = arg.parse().unwrap_or(0.0),
         "app" => {
             let a = DApp::ALL.iter().copied().find(|x| x.name().to_lowercase().starts_with(&arg.to_lowercase())).unwrap_or(DApp::Caso);
             desktop::switch(app, a);
@@ -887,7 +917,10 @@ async fn main() {
         sim: None,
         cmdlog: vec![],
         term: Term { lines: String::new(), input: String::new(), scroll: 0.0, history: vec![], hist_idx: 0 },
-        cam: OrbitCam::new(vec3(0.0, 0.85, 0.0), 3.0),
+        player: fps::Player::new(),
+        renderer: None,
+        hover_pick: None,
+        seat: (vec3(0.0, 0.0, 0.0), std::f32::consts::PI),
         selected: None,
         hover_label: None,
         desk: DesktopState::new(),

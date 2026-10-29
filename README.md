@@ -1,6 +1,6 @@
 # Perícia Sim — Simulador de Informática Forense
 
-Simulador de treinamento em perícia de informática, no estilo “hacking simulator”, baseado nos **POPs de Perícia Criminal 2024 — Informática Forense, vol. 5 (SENASP/MJSP)**. Escrito em **Rust**, com cena 3D leve que roda sem placa de vídeo dedicada.
+Simulador de treinamento em perícia de informática, no estilo “hacking simulator”, baseado nos **POPs de Perícia Criminal 2024 — Informática Forense, vol. 5 (SENASP/MJSP)**. Escrito em **Rust**, em **primeira pessoa**, com iluminação por pixel, sombras em tempo real e texturas geradas proceduralmente — roda inclusive sem placa de vídeo dedicada.
 
 > Todo o conteúdo dos casos é **fictício**. A “internet” do jogo é **emulada** dentro do programa: nenhuma ferramenta investigativa acessa a rede real, e o terminal **não** executa comandos do sistema operacional.
 
@@ -8,8 +8,9 @@ Simulador de treinamento em perícia de informática, no estilo “hacking simul
 
 Duas áreas, como pedido:
 
-* **Área de Hardware (3D)** — bancada de laboratório ou local de busca (escritório). Você vê os equipamentos (gabinetes, notebook, celular, HDs, pendrives), a câmera, o bloqueador de escrita, Faraday bag, lacres e a estação pericial ao fundo. Clique num item para ver o estado e as ações físicas disponíveis: fotografar, conferir lacre, deslacrar, isolar da rede, coletar memória, copiar volume cifrado montado, desligar, abrir gabinete, remover componentes (e descobrir mídias escondidas sob o dissipador), remover mídia, conectar bloqueador, adquirir imagem, conferir hash, isolar o celular, remover SIM, extrair, embalar, lacrar, etiquetar.
-* **Estação Pericial** — um PC na cena 3D cujo monitor mostra a tela real da estação. Ao usá‑lo você entra no **Perícia Linux 12.4**, um Linux simulado (não é VM): tela de login, painel com menu *Aplicativos* e lista de janelas, janelas móveis/redimensionáveis, **Terminal bash** (pipes, redirecionamento, `&&`/`||`, variáveis, curingas, histórico, Tab), **Arquivos**, **Editor de texto** e os aplicativos do simulador (Navegador da rede emulada, Documento pericial, Visualizador de evidências, Linha do tempo, Custódia, Manual, Mentor, Avaliação). Comandos gerais: `ls cd cat grep find stat file sha256sum mount umount lsblk dmesg df head tail wc sort uniq tree cp mv rm mkdir touch echo man…`, com `/dev`, `/proc`, `/mnt` e montagens somente leitura. As operações periciais são feitas com o comando `pericia <comando>` (ex.: `pericia imagem m-01`), que passa pelas regras do POP e pela auditoria.
+* **Ambiente em primeira pessoa (3D)** — laboratório pericial ou local de busca (escritório), percorridos a pé, sem personagem visível. Bancada antiestática, gabinetes, notebook, celular, HDs, pendrives, câmera, bloqueador de escrita, Faraday bag, lacres, armário, estante e a estação pericial. Mire num item (alcance de ~2,6 m) e clique ou aperte **E** para ver o estado e as ações físicas: fotografar, conferir lacre, deslacrar, isolar da rede, coletar memória, copiar volume cifrado montado, desligar, abrir gabinete, remover componentes (e descobrir mídias escondidas sob o dissipador), remover mídia, conectar bloqueador, adquirir imagem, conferir hash, isolar o celular, remover SIM, extrair, embalar, lacrar, etiquetar. O botão **☰ Itens e ações** lista tudo sem precisar andar.
+* **Gráficos** — texturas procedurais (madeira, piso vinílico, tecido, metal escovado, teclado, etiquetas, vista da cidade pela janela…), iluminação por pixel com luminárias, luz da janela, especular e névoa leve, **sombras em tempo real** (mapa de sombras com filtragem PCF) e sombras de contato. Sombras e cena 3D podem ser desligadas em *Configurações* para máquinas fracas.
+* **Estação Pericial** — um PC na cena 3D cujo monitor mostra a tela real da estação. Ao sentar nela você entra direto no **Perícia Linux 12.4** (sem senha), um Linux simulado (não é VM): painel com menu *Aplicativos* e lista de janelas, janelas móveis/redimensionáveis, **Terminal bash** (pipes, redirecionamento, `&&`/`||`, variáveis, curingas, histórico, Tab), **Arquivos**, **Editor de texto** e os aplicativos do simulador (Navegador da rede emulada, Documento pericial, Visualizador de evidências, Linha do tempo, Custódia, Manual, Mentor, Avaliação). Comandos gerais: `ls cd cat grep find stat file sha256sum mount umount lsblk dmesg df head tail wc sort uniq tree cp mv rm mkdir touch echo man…`, com `/dev`, `/proc`, `/mnt` e montagens somente leitura. As operações periciais são feitas com o comando `pericia <comando>` (ex.: `pericia imagem m-01`), que passa pelas regras do POP e pela auditoria.
 
 Cada botão gera um **comando do terminal** (que aparece no terminal), então você aprende a sintaxe enquanto joga. Cada caso tem uma **expressão‑alvo** escondida nos vestígios; achá‑la não basta: a avaliação considera procedimento, preservação, rastreabilidade e fundamentação, e **perda de evidência limita a nota a 60%**.
 
@@ -31,7 +32,7 @@ Cada botão gera um **comando do terminal** (que aparece no terminal), então vo
 | Auditoria encadeada SHA‑256 | Implementada; adulteração detectada |
 | Avaliação explicada + mentor adaptativo | Implementados |
 | Persistência (continuar caso, histórico, configurações) | Implementada por replay determinístico |
-| Interface 3D + modo 2D leve + economia de energia | Implementados |
+| Interface 3D em primeira pessoa (colisão, mira, interação) + texturas + sombras + modo 2D leve + economia de energia | Implementados |
 | Linux simulado na estação (desktop, terminal bash, arquivos, editor) | Implementado; replay do terminal reproduz a auditoria (testado) |
 | Regras realistas do aparelho móvel: bateria em AFU, IMEI físico × lógico, ligar/desligar | Implementadas e testadas |
 | Tela simulada do celular | **Não implementada** (interrompida por filtro de segurança da IA que desenvolveu o projeto) |
@@ -43,8 +44,8 @@ Cada botão gera um **comando do terminal** (que aparece no terminal), então vo
 ## Executar (Linux x86_64)
 
 ```bash
-tar xzf pericia-sim-0.2.0-linux-x86_64.tar.gz
-cd pericia-sim-0.2.0-linux-x86_64
+tar xzf pericia-sim-0.3.0-linux-x86_64.tar.gz
+cd pericia-sim-0.3.0-linux-x86_64
 ./pericia-sim          # rodar direto
 ./install.sh           # ou instalar no menu de aplicativos (sem sudo)
 ```
@@ -68,9 +69,9 @@ No Windows e no macOS o mesmo comando gera o executável nativo (`target/release
 
 1. No menu, escolha o **POP**, a **dificuldade** (comece por *1 · Guiado*) e clique em **Iniciar novo caso**. Para repetir um caso, digite o ID (ex.: `C501-D2-00000007`).
 2. Leia o caso: botão **Mentor** ou, na Estação, aplicativo **Caso** (histórico, objetivo, quesitos, autorização legal).
-3. Na **Área de Hardware**: botão direito gira a câmera, roda aproxima, clique seleciona. Use as ações do painel direito na ordem do POP.
+3. No **Ambiente**: **WASD** anda (Shift corre), segure o **botão direito** (ou aperte **Tab** para capturar o mouse) para olhar, mire e clique/**E** para interagir. Use as ações do painel na ordem do POP.
 4. Adquira a mídia (bloqueador → imagem → verificar hash) ou extraia o celular.
-5. Na **Estação Pericial**, clique na tela e entre com a senha `perito`. No Terminal: `lsblk`, `pericia imagem m-01`, `sudo mkdir -p /mnt/m01`, `sudo mount -o ro,loop ~/casos/<ID>/M-01.dd /mnt/m01`, `grep -ril <termo> /mnt/m01`, `stat`, `sha256sum`. Use também **Arquivos**, **Navegador** e **Linha do tempo** (menu *Aplicativos*).
+5. Vá até a **Estação Pericial** e clique no monitor (ou use a aba no topo) — a sessão já abre com um terminal. Para voltar, **◄ Levantar da estação**. No Terminal: `lsblk`, `pericia imagem m-01`, `sudo mkdir -p /mnt/m01`, `sudo mount -o ro,loop ~/casos/<ID>/M-01.dd /mnt/m01`, `grep -ril <termo> /mnt/m01`, `stat`, `sha256sum`. Use também **Arquivos**, **Navegador** e **Linha do tempo** (menu *Aplicativos*).
 6. Quando achar a expressão, registre com `achei <expressão>`; no **Documento**, use *Pré‑preencher*, revise, escreva a conclusão separando fato de inferência, *Verificar coerência* e *Emitir e finalizar*.
 7. Leia a **Avaliação**: cada ponto perdido traz o motivo.
 
@@ -89,7 +90,8 @@ Em `~/.local/share/pericia-sim` (Linux), `%APPDATA%\pericia-sim` (Windows) ou `~
 ```
 crates/core   motor puro em Rust (apenas serde): casos, evidências, rede emulada,
               regras dos POPs, auditoria, avaliação, laudo/termo, PDF e Markdown
-crates/app    interface macroquad: cena 3D procedural + PeritOS
+crates/app    interface macroquad: renderizador próprio (shader GLSL, sombras, texturas
+              procedurais), mundo em primeira pessoa, desktop Linux simulado
 docs/         análise técnica, design da simulação, desempenho, ADRs, matriz de rastreabilidade
 ```
 
