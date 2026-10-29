@@ -112,7 +112,7 @@ No Windows e no macOS o mesmo comando gera o executável nativo (`target/release
 7. **Quadro de provas** (parede esquerda, ou mire nele e aperte E): cada foto tirada com a câmera na cena vira uma foto de verdade no quadro; acrescente bilhetes, anotações do tablet e ligue tudo com barbante vermelho. O quadro também aparece na parede, em 3D.
 8. Leia a **Avaliação**: cada ponto perdido traz o motivo.
 
-Atalhos do terminal: ↑/↓ histórico, `limpar`, Ctrl+V cola. No editor e nos campos do documento: setas, Home/End, Delete e clique posicionam o cursor.
+O terminal do simulador fica oculto: **F2** (ou **'**) abre e fecha, **Esc** ou **✕ Fechar** escondem. Atalhos do terminal: ↑/↓ histórico, `limpar`, Ctrl+V cola. No editor e nos campos do documento: setas, Home/End, Delete e clique posicionam o cursor.
 
 ## Modelos 3D e texturas
 
