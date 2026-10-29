@@ -1,0 +1,15 @@
+[package]
+name = "pericia_app"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+description = "Interface 3D/2D do simulador de informática forense."
+
+[[bin]]
+name = "pericia-sim"
+path = "src/main.rs"
+
+[dependencies]
+pericia_core = { path = "../core" }
+macroquad = { version = "0.4.16", default-features = false }
+serde_json = "1"
