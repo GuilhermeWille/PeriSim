@@ -128,17 +128,17 @@ impl Sim {
         s
     }
 
-    fn tick(&mut self, minutes: i64) {
+    pub(crate) fn tick(&mut self, minutes: i64) {
         self.clock += minutes * 60;
         self.run_events();
     }
 
-    fn rec(&mut self, action: &str, detail: &str, outcome: &str) {
+    pub(crate) fn rec(&mut self, action: &str, detail: &str, outcome: &str) {
         let (a, d, o) = (action.to_string(), detail.to_string(), outcome.to_string());
         self.audit.record(self.clock, &self.actor.clone(), &a, &d, &o);
     }
 
-    fn fault(&mut self, f: &str) {
+    pub(crate) fn fault(&mut self, f: &str) {
         self.faults.push(format!("[{}] {}", fmt_dt(self.clock, BRT), f));
     }
 
@@ -266,6 +266,7 @@ impl Sim {
             "embalar" => self.cmd_embalar(&a(1)),
             "camera" => self.cmd_camera(&a(1), &a(2)),
             "solicitar-senhas" => self.cmd_solicitar_senhas(&a(1)),
+            "tela" => self.cmd_tela(&a(1), &a(2)),
             "etiquetar" => self.cmd_etiquetar(&a(1), &toks),
             // --- investigação (sistema de arquivos / rede) — delegado a tools
             "fs" => tools::fs(self, &toks),
@@ -668,7 +669,7 @@ impl Sim {
         Output::ok(format!("{}\nArtefato {} (SHA-256 {}…).", text, aid, &h[..12]))
     }
 
-    fn item_mut_ro(&self, id: &str) -> Option<usize> {
+    pub(crate) fn item_mut_ro(&self, id: &str) -> Option<usize> {
         self.case.items.iter().position(|i| i.id.eq_ignore_ascii_case(id) && (!i.hidden || i.flag("descoberto")))
     }
 

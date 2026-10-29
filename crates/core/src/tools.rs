@@ -54,6 +54,7 @@ Físico:          fotografar · lacre conferir|aplicar · deslacrar · abrir · 
 Móveis:          isolar <item> faraday|aluminio · airplane · sim remover · alarmes · carregar
                  camera cobrir <item> · solicitar-senhas <item> · imei verificar <item>
                  desbloquear <item> <senha> · extrair <item> fisica|fs|logica · senha
+                 tela <item> inicio|mensagens|telefone|contatos|galeria|arquivos|relogio|config|imei|foto
 Coleta:          embalar · etiquetar
 Investigação:    fs ... · recuperar · expandir · decifrar · ocr · dicionario
                  conexao · dns · whois · traceroute · navegar · preservar · arquivo-web · email · rede logs

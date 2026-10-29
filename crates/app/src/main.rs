@@ -6,6 +6,7 @@ mod desktop;
 mod linuxde;
 mod save;
 mod fps;
+mod phone;
 mod render;
 mod world;
 mod ui;
@@ -76,6 +77,7 @@ pub struct App {
     pub history: Vec<save::HistoryEntry>,
     pub show_help_overlay: bool,
     pub de: linuxde::LinuxDe,
+    pub phone: phone::PhoneUi,
 }
 
 impl App {
@@ -432,6 +434,7 @@ fn item_actions(sim: &Sim, it: &Item) -> Vec<(String, String, bool)> {
         }
     }
     if let Some(ph) = &it.phone {
+        add(&mut v, "▣ Ver a tela do aparelho", "@tela".into(), true);
         add(&mut v, "Isolar: Faraday bag", format!("isolar {} faraday", id), !ph.rf.isolates());
         add(&mut v, "Isolar: alumínio (3 camadas)", format!("isolar {} aluminio", id), !ph.rf.isolates());
         add(&mut v, "Modo avião", format!("airplane {}", id), !ph.airplane);
@@ -474,11 +477,29 @@ fn item_actions(sim: &Sim, it: &Item) -> Vec<(String, String, bool)> {
 }
 
 fn hardware(app: &mut App, area: Rect) {
+    if app.phone.open.is_none() {
+        hardware_inner(app, area, false);
+        return;
+    }
+    // aparelho em mãos: a cena continua desenhada, mas não recebe entrada
+    let clicked = app.ui.clicked && !app.ui.click_consumed;
+    let wheel = app.ui.wheel;
+    app.ui.click_consumed = true;
+    app.ui.wheel = 0.0;
+    hardware_inner(app, area, true);
+    app.ui.click_consumed = !clicked;
+    app.ui.wheel = wheel;
+    app.ui.tooltip = None;
+    app.hover_label = None;
+    phone::draw(app, area);
+}
+
+fn hardware_inner(app: &mut App, area: Rect, modal: bool) {
     let s = app.ui.scale;
     let show_panel = app.selected.is_some() || app.show_help_overlay;
     let panel_w = if show_panel { 380.0 * s } else { 0.0 };
     let view = rect(area.x, area.y, area.w - panel_w, area.h);
-    let typing = matches!(app.ui.focus.as_deref(), Some("term") | Some("pin") | Some("seed"));
+    let typing = modal || matches!(app.ui.focus.as_deref(), Some("term") | Some("pin") | Some("seed"));
     if !app.settings.render3d {
         // modo 2D leve: cartões clicáveis
         app.ui.panel(view, T.bg);
@@ -529,14 +550,14 @@ fn hardware(app: &mut App, area: Rect) {
         app.player.case = case_id;
         app.player.place(wrld.start.0, wrld.start.1);
     }
-    if app.player.update(&wrld, !typing, view.contains(app.ui.mouse)) {
+    if app.player.update(&wrld, !typing, !modal && view.contains(app.ui.mouse)) {
         app.ui.any_input = true;
     }
     if !typing && is_key_pressed(KeyCode::Tab) {
         let c = !app.player.captured;
         app.player.set_captured(c);
     }
-    if app.player.captured && app.ui.key_esc {
+    if app.player.captured && (app.ui.key_esc || modal) {
         app.player.set_captured(false);
     }
     // mira e seleção (alcance de braço: é preciso se aproximar)
@@ -730,8 +751,13 @@ fn side_panel(app: &mut App, panel: Rect) {
                 if app.ui.hover(r) {
                     app.ui.tooltip = Some(c.clone());
                 }
-                if app.ui.button_c(r, l, T.panel2, *en) {
-                    app.run(c);
+                if app.ui.button_c(r, l, if c == "@tela" { T.accent2 } else { T.panel2 }, *en) {
+                    if c == "@tela" {
+                        app.phone.close();
+                        app.phone.open = Some(it.id.clone());
+                    } else {
+                        app.run(c);
+                    }
                 }
             }
             if let Some(tt) = app.ui.tooltip.clone() {
@@ -890,6 +916,21 @@ fn run_script(app: &mut App, sc: &mut Script) -> bool {
         "cwd" => app.de.files_cwd = arg,
         "edit" => linuxde::open_in_editor(app, &arg),
         "menuopen" => app.de.menu_open = true,
+        "phone" => {
+            app.phone.close();
+            app.phone.open = if arg == "off" { None } else { Some(arg.to_uppercase()) };
+        }
+        "papp" => {
+            let id = app.phone.open.clone().unwrap_or_default();
+            let out = app.run(&format!("tela {} {}", id.to_lowercase(), arg));
+            if !out.starts_with("ERRO") {
+                app.phone.app = arg;
+                app.phone.sub = None;
+            }
+        }
+        "psub" => app.phone.sub = arg.parse().ok(),
+        "ptab" => app.phone.tab = arg.parse().unwrap_or(0),
+        "pemerg" => app.phone.emergency = true,
         "menu" => {
             app.screen = Screen::Menu;
             app.history = save::history();
@@ -936,6 +977,7 @@ async fn main() {
         toast: None,
         history: save::history(),
         show_help_overlay: false,
+        phone: phone::PhoneUi::default(),
         de: linuxde::LinuxDe::new(),
     };
     // roteiro opcional para capturas automáticas (validação headless)

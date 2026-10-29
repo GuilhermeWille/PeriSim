@@ -35,7 +35,7 @@ Cada botão gera um **comando do terminal** (que aparece no terminal), então vo
 | Interface 3D em primeira pessoa (colisão, mira, interação) + texturas + sombras + modo 2D leve + economia de energia | Implementados |
 | Linux simulado na estação (desktop, terminal bash, arquivos, editor) | Implementado; replay do terminal reproduz a auditoria (testado) |
 | Regras realistas do aparelho móvel: bateria em AFU, IMEI físico × lógico, ligar/desligar | Implementadas e testadas |
-| Tela simulada do celular | **Não implementada** (interrompida por filtro de segurança da IA que desenvolveu o projeto) |
+| Tela simulada do celular (FoneOS: tela bloqueada BFU/AFU, emergência/*#06#, início, mensagens, telefone, contatos, galeria com EXIF, arquivos, relógio, configurações; navegação auditada e sujeita às regras dos POPs) | Implementada e testada (9 testes). Sem teclado de desbloqueio na tela: o acesso depende do estado do aparelho, da senha documentada ou da extração |
 | **Linux** | Compilado, executado e medido (OpenGL por software, sem GPU) |
 | **Windows / macOS** | **Não testados** — o código não usa nada específico de Linux; compile nativamente (abaixo) |
 
@@ -44,8 +44,8 @@ Cada botão gera um **comando do terminal** (que aparece no terminal), então vo
 ## Executar (Linux x86_64)
 
 ```bash
-tar xzf pericia-sim-0.3.0-linux-x86_64.tar.gz
-cd pericia-sim-0.3.0-linux-x86_64
+tar xzf pericia-sim-0.3.1-linux-x86_64.tar.gz
+cd pericia-sim-0.3.1-linux-x86_64
 ./pericia-sim          # rodar direto
 ./install.sh           # ou instalar no menu de aplicativos (sem sudo)
 ```
@@ -59,7 +59,7 @@ Requer apenas as bibliotecas OpenGL/X11 do sistema (presentes em qualquer deskto
 3. Na pasta do projeto:
 
 ```bash
-cargo test --workspace              # 50 testes (motor, Linux simulado, replay)
+cargo test --workspace              # 60 testes (motor, Linux simulado, replay)
 cargo run --release -p pericia_app  # abre o simulador
 ```
 
