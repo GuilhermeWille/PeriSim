@@ -33,6 +33,17 @@ pub enum Tex {
     Glass,
     Blob,
     Outside,
+    // imagens de decoração (assets/textures, geradas por tools/texturas) e vestígios
+    Cork,
+    Whiteboard,
+    PosterPop,
+    PosterEpi,
+    Painting,
+    Calendar,
+    SignLab,
+    ClockFace,
+    Document,
+    Blood,
 }
 
 impl Tex {
@@ -61,13 +72,28 @@ impl Tex {
             Tex::Glass => "vidro",
             Tex::Blob => "sombra_contato",
             Tex::Outside => "vista_janela",
+            Tex::Cork => "quadro_cortica",
+            Tex::Whiteboard => "quadro_branco",
+            Tex::PosterPop => "cartaz_pop",
+            Tex::PosterEpi => "cartaz_epi",
+            Tex::Painting => "pintura",
+            Tex::Calendar => "calendario",
+            Tex::SignLab => "placa_lab",
+            Tex::ClockFace => "relogio",
+            Tex::Document => "documento",
+            Tex::Blood => "mancha",
         }
+    }
+    /// Imagem aplicada com UV 0..1 (quadros, cartazes, mostradores): não repete.
+    pub fn is_image(self) -> bool {
+        matches!(self, Tex::Cork | Tex::Whiteboard | Tex::PosterPop | Tex::PosterEpi | Tex::Painting | Tex::Calendar | Tex::SignLab | Tex::ClockFace | Tex::Document | Tex::Blood)
     }
 }
 
-pub const ALL_TEX: [Tex; 21] = [
+pub const ALL_TEX: [Tex; 31] = [
     Tex::White, Tex::Wood, Tex::WoodFloor, Tex::Vinyl, Tex::Wall, Tex::Ceiling, Tex::Metal, Tex::Plastic, Tex::Fabric, Tex::Mat, Tex::Vent, Tex::Keyboard, Tex::Label, Tex::Rug,
-    Tex::Leaf, Tex::Cardboard, Tex::Screen, Tex::Concrete, Tex::Glass, Tex::Blob, Tex::Outside,
+    Tex::Leaf, Tex::Cardboard, Tex::Screen, Tex::Concrete, Tex::Glass, Tex::Blob, Tex::Outside, Tex::Cork, Tex::Whiteboard, Tex::PosterPop, Tex::PosterEpi,
+    Tex::Painting, Tex::Calendar, Tex::SignLab, Tex::ClockFace, Tex::Document, Tex::Blood,
 ];
 
 fn hash(x: i32, y: i32, s: u32) -> f32 {
@@ -234,12 +260,24 @@ pub fn gen(t: Tex) -> Vec<u8> {
                     }
                     c
                 }
+                // sem o arquivo de imagem: tons neutros (o jogo continua coerente)
+                Tex::Cork => mix([0.55, 0.38, 0.22], [0.70, 0.50, 0.30], fbm(u, v, 32, 3, 161)),
+                Tex::Whiteboard | Tex::Document => [0.96, 0.96, 0.95],
+                Tex::PosterPop => if v < 0.14 { [0.09, 0.2, 0.38] } else { [0.95, 0.96, 0.97] },
+                Tex::PosterEpi => [1.0, 0.84, 0.16],
+                Tex::Painting => mix([0.3, 0.32, 0.55], [0.85, 0.6, 0.4], v),
+                Tex::Calendar | Tex::ClockFace => [0.98, 0.98, 0.97],
+                Tex::SignLab => [0.09, 0.2, 0.38],
+                Tex::Blood => [0.30, 0.06, 0.05],
             };
             let i = (y * n + x) * 4;
             px[i] = (c[0].clamp(0.0, 1.0) * 255.0) as u8;
             px[i + 1] = (c[1].clamp(0.0, 1.0) * 255.0) as u8;
             px[i + 2] = (c[2].clamp(0.0, 1.0) * 255.0) as u8;
-            px[i + 3] = if t == Tex::Blob {
+            px[i + 3] = if t == Tex::Blood {
+                let d = ((u - 0.5) * (u - 0.5) + (v - 0.5) * (v - 0.5)).sqrt() * 2.0;
+                if d < 0.55 + 0.1 * (fbm(u, v, 8, 2, 171) - 0.5) { 230 } else { 0 }
+            } else if t == Tex::Blob {
                 let d = ((u - 0.5) * (u - 0.5) + (v - 0.5) * (v - 0.5)).sqrt() * 2.0;
                 ((1.0 - d).clamp(0.0, 1.0).powf(1.6) * 255.0) as u8
             } else {
@@ -436,6 +474,15 @@ pub fn material_tex(name: &str) -> (Tex, f32, f32, bool) {
         "vidro" => (Tex::Glass, 1.0, 0.8, false),
         "tela" => (Tex::Screen, 1.0, 0.6, false),
         "luz" => (Tex::White, 1.0, 0.0, true),
+        "cortica" => (Tex::Cork, 1.0, 0.05, false),
+        "quadrobranco" => (Tex::Whiteboard, 1.0, 0.45, false),
+        "cartazpop" => (Tex::PosterPop, 1.0, 0.25, false),
+        "cartazepi" => (Tex::PosterEpi, 1.0, 0.25, false),
+        "pintura" => (Tex::Painting, 1.0, 0.2, false),
+        "calendario" => (Tex::Calendar, 1.0, 0.1, false),
+        "placalab" => (Tex::SignLab, 1.0, 0.3, false),
+        "relogio" => (Tex::ClockFace, 1.0, 0.5, false),
+        "documento" => (Tex::Document, 1.0, 0.05, false),
         _ => (Tex::White, 1.0, 0.2, false),
     }
 }
@@ -468,7 +515,7 @@ impl Renderer {
         for t in ALL_TEX {
             // textura fornecida (opcional) tem prioridade; a procedural é o padrão
             if t != Tex::Desktop {
-                match crate::assets::load_texture_override(t.file_name(), t != Tex::Blob) {
+                match crate::assets::load_texture_override(t.file_name(), t != Tex::Blob && !t.is_image()) {
                     Ok(Some((tx, msg))) => {
                         asset_log.push(msg);
                         tex.insert(t, tx);
@@ -479,7 +526,7 @@ impl Renderer {
                 }
             }
             let px = gen(t);
-            tex.insert(t, make_texture(&px, 256, 256, t != Tex::Blob));
+            tex.insert(t, make_texture(&px, 256, 256, t != Tex::Blob && !t.is_image()));
         }
         asset_log.extend(crate::assets::validate_models());
         for l in &asset_log {
@@ -719,12 +766,14 @@ impl Renderer {
                 let i = self.batch_room(mt.t, verts.len(), idx.len());
                 let b = &mut self.batches[i];
                 let base = b.1.len() as u16;
-                let raw_uv = mt.tile >= 0.999 && (mt.emis || mt.t == Tex::Screen || mt.t == Tex::Desktop);
+                let raw_uv = mt.tile >= 0.999 && (mt.emis || mt.t == Tex::Screen || mt.t == Tex::Desktop || mt.t.is_image());
                 for &(p, n, uv) in verts {
                     let wp = tr(p);
                     let ao = if mt.emis { 1.0 } else { (0.62 + wp.y * 0.9).min(1.0) };
                     let col = [(mt.c.r * ao * 255.0) as u8, (mt.c.g * ao * 255.0) as u8, (mt.c.b * ao * 255.0) as u8, (mt.c.a * 255.0) as u8];
-                    b.1.push(Vertex { position: wp, uv: if raw_uv { uv } else { uv * k }, color: col, normal: rn(n).extend(w) });
+                    // imagens PNG (linha 0 no topo) e o "tela" do Blender (u invertido) usam convenções opostas
+                    let uv = if mt.t.is_image() { vec2(uv.x, 1.0 - uv.y) } else if raw_uv { uv } else { uv * k };
+                    b.1.push(Vertex { position: wp, uv, color: col, normal: rn(n).extend(w) });
                 }
                 b.2.extend(idx.iter().map(|&x| base + x));
             }
@@ -742,7 +791,7 @@ impl Renderer {
             let mt = over.iter().find(|(k, _)| *k == part.material).map(|(_, x)| *x).unwrap_or(part.mt);
             let k = 1.0 / mt.tile.max(0.001);
             let w = if mt.emis { 2.0 } else { mt.spec };
-            let raw_uv = mt.tile >= 0.999 && (mt.emis || mt.t == Tex::Screen || mt.t == Tex::Desktop);
+            let raw_uv = mt.tile >= 0.999 && (mt.emis || mt.t == Tex::Screen || mt.t == Tex::Desktop || mt.t.is_image());
             let col = [(mt.c.r * 255.0) as u8, (mt.c.g * 255.0) as u8, (mt.c.b * 255.0) as u8, 255];
             for (verts, idx) in &part.chunks {
                 let i = match self.vm_batches.iter().position(|b| b.0 == mt.t && b.1.len() + verts.len() <= MAX_BATCH_VERTS && b.2.len() + idx.len() <= MAX_BATCH_INDICES) {
@@ -755,7 +804,8 @@ impl Renderer {
                 let b = &mut self.vm_batches[i];
                 let base = b.1.len() as u16;
                 for &(p, n, uv) in verts {
-                    b.1.push(Vertex { position: m.transform_point3(p), uv: if raw_uv { uv } else { uv * k }, color: col, normal: (nm * n).normalize_or_zero().extend(w) });
+                    let uv = if mt.t.is_image() { vec2(uv.x, 1.0 - uv.y) } else if raw_uv { uv } else { uv * k };
+                    b.1.push(Vertex { position: m.transform_point3(p), uv, color: col, normal: (nm * n).normalize_or_zero().extend(w) });
                 }
                 b.2.extend(idx.iter().map(|&x| base + x));
             }

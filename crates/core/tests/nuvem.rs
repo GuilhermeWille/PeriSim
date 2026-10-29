@@ -1,6 +1,6 @@
 //! Evidências em nuvem: autorização judicial, requisição ao provedor e captura direta.
 
-use pericia_core::casegen::generate;
+use pericia_core::casegen::generate_classic as generate;
 use pericia_core::engine::Sim;
 use pericia_core::model::*;
 

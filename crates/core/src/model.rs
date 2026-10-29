@@ -692,6 +692,25 @@ pub struct CaseFile {
     pub provided_passwords: Vec<(String, String)>,
     /// Operadoras fictícias: PIN padrão divulgado.
     pub operator_default_pins: Vec<(String, String)>,
+    /// Vestígios não digitais da cena (sangue, cabelo, bituca…) — gerador 1.2.0+.
+    #[serde(default)]
+    pub vestigios: Vec<Vestigio>,
+}
+
+/// Vestígio físico na cena ou no material. O perito de informática sinaliza, fotografa e
+/// comunica; a coleta é da equipe especializada.
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
+pub struct Vestigio {
+    pub id: String,
+    /// sangue | cabelo | bituca | copo | pegada
+    pub kind: String,
+    pub label: String,
+    pub desc: String,
+    /// Item onde está (None = no ambiente).
+    pub on_item: Option<String>,
+    pub biologico: bool,
+    /// Âncora de posição para a cena 3D: "item", "piso_mesa", "teclado", "mesa", "bancada", "cinzeiro".
+    pub spot: String,
 }
 
 impl CaseFile {

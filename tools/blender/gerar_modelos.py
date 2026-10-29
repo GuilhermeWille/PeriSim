@@ -68,6 +68,27 @@ MATERIAIS = {
     "luz": ((1.0, 0.97, 0.88), 0.5),
     "placa_verde": ((0.08, 0.35, 0.20), 0.6),
     "tecido_cinza": ((0.35, 0.35, 0.37), 0.95),
+    "tecido_prata": ((0.62, 0.64, 0.66), 0.6),
+    "pele": ((0.80, 0.60, 0.47), 0.6),
+    "pele_unha": ((0.88, 0.72, 0.66), 0.4),
+    "luva": ((0.30, 0.45, 0.85), 0.5),
+    "plastico_amarelo": ((0.95, 0.78, 0.10), 0.5),
+    "papelao_azul": ((0.35, 0.50, 0.75), 0.8),
+    "papel": ((0.95, 0.95, 0.93), 0.9),
+    "documento": ((1.0, 1.0, 1.0), 0.9),
+    "espuma": ((0.14, 0.14, 0.15), 0.98),
+    "concreto_cinza": ((0.45, 0.45, 0.45), 0.95),
+    "cafe": ((0.22, 0.12, 0.06), 0.2),
+    "batom": ((0.65, 0.12, 0.18), 0.4),
+    "vidro": ((0.75, 0.82, 0.85), 0.1),
+    "cortica": ((1.0, 1.0, 1.0), 0.9),
+    "quadrobranco": ((1.0, 1.0, 1.0), 0.3),
+    "cartazpop": ((1.0, 1.0, 1.0), 0.6),
+    "cartazepi": ((1.0, 1.0, 1.0), 0.6),
+    "pintura": ((1.0, 1.0, 1.0), 0.6),
+    "calendario": ((1.0, 1.0, 1.0), 0.8),
+    "placalab": ((1.0, 1.0, 1.0), 0.5),
+    "relogio": ((1.0, 1.0, 1.0), 0.4),
 }
 
 
@@ -584,6 +605,315 @@ def tablet_perito():
     return m
 
 
+# =========================================================================== v0.8: mãos, ferramentas, maleta, cena
+
+def anel(m, raio, r_cabo, centro, mat, segs=14, frac=1.0, z_passo=0.0):
+    """Cabo enrolado: anel (ou espiral, com z_passo) de cilindros tangentes no plano XY."""
+    n = max(3, int(segs * frac))
+    for k in range(n):
+        a = (k + 0.5) / segs * math.tau
+        p = Vector(centro) + Vector((math.cos(a) * raio, math.sin(a) * raio, z_passo * k / segs))
+        comp = math.tau * raio / segs * 1.08
+        m.cilindro(r_cabo, r_cabo, comp, p, mat, segs=6, rot=(0, math.pi / 2, a + math.pi / 2))
+
+
+def maos():
+    """Mão direita do perito em empunhadura, com o punho da manga. Dedos para -Y (no jogo,
+    para a frente); palma voltada para +X no Blender (no jogo, para o centro da tela)."""
+    m = Modelo("maos")
+    # manga do casaco e punho
+    m.cilindro(0.05, 0.046, 0.24, (0.0, 0.25, -0.01), "tecido_preto", segs=12, rot=(math.pi / 2, 0, 0))
+    m.cilindro(0.047, 0.047, 0.02, (0.0, 0.135, -0.01), "tecido_cinza", segs=12, rot=(math.pi / 2, 0, 0))
+    m.cilindro(0.031, 0.036, 0.06, (0.0, 0.10, -0.008), "pele", segs=10, rot=(math.pi / 2, 0, 0))  # pulso
+    # palma (dorso para -X, palma para +X)
+    m.caixa((0.032, 0.09, 0.085), (0.0, 0.03, 0.0), "pele", 0.012, segs=2)
+    # quatro dedos: falange proximal para a frente, médio/distal dobrando para a palma (+X)
+    for k, (z, comp) in enumerate([(0.03, 0.045), (0.01, 0.05), (-0.01, 0.047), (-0.029, 0.038)]):
+        r = 0.0095 if k < 3 else 0.0085
+        m.caixa((0.022, comp, 0.019), (0.002, -0.015 - comp / 2, z), "pele", r * 0.8, segs=2)
+        m.caixa((0.04, 0.02, 0.018), (0.022, -0.03 - comp, z), "pele", r * 0.8, segs=2, rot=(0, 0, 0.35))
+        m.caixa((0.014, 0.006, 0.012), (-0.008, -0.04 - comp, z), "pele_unha", 0.002)
+    # polegar: sai da base da palma, contorna por cima da empunhadura
+    m.caixa((0.024, 0.045, 0.022), (0.018, 0.035, 0.036), "pele", 0.009, segs=2, rot=(0.25, 0, -0.35))
+    m.caixa((0.021, 0.036, 0.02), (0.031, 0.004, 0.042), "pele", 0.008, segs=2, rot=(0.15, 0, -0.75))
+    m.caixa((0.012, 0.006, 0.011), (0.044, -0.01, 0.045), "pele_unha", 0.002, rot=(0, 0, -0.75))
+    return m
+
+
+def chave_phillips():
+    m = Modelo("chave_phillips")
+    m.cilindro(0.015, 0.016, 0.1, (0, 0, 0.05), "plastico_vermelho", segs=12)
+    m.cilindro(0.017, 0.017, 0.012, (0, 0, 0.098), "plastico_preto", segs=12)
+    m.cilindro(0.0035, 0.0035, 0.1, (0, 0, 0.15), "metal_cromado", segs=8)
+    m.cilindro(0.0035, 0.0008, 0.012, (0, 0, 0.206), "metal_cromado", segs=8)
+    return m
+
+
+def tesoura():
+    m = Modelo("tesoura")
+    for s in (-1, 1):
+        m.caixa((0.008, 0.11, 0.003), (s * 0.006, 0.06, 0.004 + s * 0.0016), "metal_cromado", 0.001, rot=(0, 0, s * 0.06))
+        anel(m, 0.016, 0.0035, (s * 0.02, -0.01, 0.004 + s * 0.0016), "plastico_laranja", segs=10)
+    m.cilindro(0.0035, 0.0035, 0.01, (0, 0.0, 0.004), "metal_escuro", segs=8)
+    return m
+
+
+def lanterna():
+    m = Modelo("lanterna")
+    m.cilindro(0.014, 0.014, 0.13, (0, 0, 0.065), "metal_escuro", segs=12)
+    m.cilindro(0.02, 0.016, 0.035, (0, 0, 0.145), "metal_escuro", segs=12)
+    m.cilindro(0.018, 0.018, 0.003, (0, 0, 0.163), "luz", segs=12)
+    m.caixa((0.008, 0.012, 0.006), (0.014, 0, 0.08), "borracha", 0.002)
+    return m
+
+
+def placa_vestigio():
+    """Placa numerada de sinalização (cavalete amarelo dobrado, ≈ 10 × 6 × 6 cm)."""
+    m = Modelo("placa_vestigio")
+    for s in (-1, 1):
+        m.caixa((0.1, 0.004, 0.07), (0, s * 0.018, 0.032), "plastico_amarelo", 0.0015, rot=(s * 0.5, 0, 0))
+    m.caixa((0.06, 0.002, 0.03), (0, 0.0365, 0.034), "etiqueta", rot=(0.5, 0, 0))
+    return m
+
+
+def regua_escala():
+    m = Modelo("regua_escala")
+    m.caixa((0.15, 0.03, 0.002), (0, 0, 0.001), "plastico_branco")
+    m.caixa((0.15, 0.03, 0.0005), (0, 0, 0.0022), "etiqueta")
+    return m
+
+
+def _plug(m, loc, mat, rot=(0, 0, 0), tam=(0.014, 0.03, 0.008)):
+    m.caixa(tam, loc, mat, 0.002, rot=rot)
+
+
+def cabo_sata():
+    m = Modelo("cabo_sata")
+    anel(m, 0.06, 0.003, (0, 0, 0.006), "plastico_vermelho", segs=16, frac=0.85)
+    anel(m, 0.052, 0.003, (0, 0, 0.012), "plastico_preto", segs=16, frac=0.8)
+    _plug(m, (0.07, -0.02, 0.008), "plastico_vermelho", tam=(0.016, 0.026, 0.006))
+    _plug(m, (0.06, 0.035, 0.012), "plastico_preto", tam=(0.024, 0.022, 0.008))
+    return m
+
+
+def _cabo_enrolado(nome, mat, plug_mat):
+    m = Modelo(nome)
+    anel(m, 0.055, 0.0028, (0, 0, 0.004), mat, segs=16, frac=0.9)
+    anel(m, 0.048, 0.0028, (0, 0, 0.009), mat, segs=16, frac=0.9)
+    _plug(m, (0.06, -0.025, 0.006), plug_mat, tam=(0.012, 0.024, 0.006))
+    m.caixa((0.006, 0.01, 0.003), (0.06, -0.042, 0.006), "metal_cromado", 0.0005)
+    return m
+
+
+def cabo_usb():
+    return _cabo_enrolado("cabo_usb", "plastico_preto", "plastico_cinza")
+
+
+def cabo_branco():
+    return _cabo_enrolado("cabo_branco", "plastico_branco", "plastico_branco")
+
+
+def adaptador_m2():
+    m = Modelo("adaptador_m2")
+    m.caixa((0.11, 0.035, 0.012), (0, 0, 0.006), "plastico_preto", 0.003)
+    m.caixa((0.08, 0.026, 0.002), (-0.005, 0, 0.013), "placa_verde")
+    m.caixa((0.012, 0.016, 0.006), (0.06, 0, 0.006), "metal_cromado", 0.001)
+    return m
+
+
+def leitor_sd():
+    m = Modelo("leitor_sd")
+    m.caixa((0.05, 0.03, 0.01), (0, 0, 0.005), "plastico_preto", 0.003)
+    m.caixa((0.014, 0.008, 0.005), (0.028, 0, 0.005), "metal_cromado", 0.001)
+    m.caixa((0.024, 0.002, 0.0015), (-0.008, 0.0155, 0.006), "plastico_escuro")
+    return m
+
+
+def bateria_externa():
+    m = Modelo("bateria_externa")
+    m.caixa((0.07, 0.14, 0.018), (0, 0, 0.009), "plastico_escuro", 0.008, segs=2)
+    for k in range(4):
+        m.caixa((0.004, 0.004, 0.001), (-0.012 + k * 0.008, -0.05, 0.0185), "luz")
+    m.caixa((0.01, 0.004, 0.004), (0, 0.07, 0.009), "metal_cromado", 0.0008)
+    return m
+
+
+def faraday_bag():
+    m = Modelo("faraday_bag")
+    m.caixa((0.12, 0.2, 0.012), (0, 0, 0.006), "tecido_prata", 0.004, segs=2)
+    m.caixa((0.12, 0.05, 0.006), (0, 0.075, 0.015), "tecido_cinza", 0.002)
+    m.caixa((0.05, 0.02, 0.001), (0, -0.04, 0.0125), "etiqueta")
+    return m
+
+
+def papel_aluminio():
+    m = Modelo("papel_aluminio")
+    m.caixa((0.3, 0.05, 0.05), (0, 0, 0.025), "papelao_azul", 0.002)
+    m.cilindro(0.021, 0.021, 0.29, (0, 0.0, 0.05), "metal_prata", segs=12, rot=(0, math.pi / 2, 0))
+    m.caixa((0.28, 0.06, 0.0008), (0, 0.04, 0.05), "metal_prata")
+    return m
+
+
+def ejetor_sim():
+    m = Modelo("ejetor_sim")
+    anel(m, 0.009, 0.0012, (0, 0, 0.0012), "metal_cromado", segs=10)
+    m.cilindro(0.0007, 0.0007, 0.02, (0, -0.019, 0.0012), "metal_cromado", segs=6, rot=(math.pi / 2, 0, 0))
+    m.caixa((0.03, 0.04, 0.001), (0, -0.005, 0.0), "papelao")  # cartela
+    return m
+
+
+def pendrive_coleta():
+    m = Modelo("pendrive_coleta")
+    m.caixa((0.022, 0.055, 0.009), (0, 0, 0.0045), "plastico_laranja", 0.003)
+    m.caixa((0.013, 0.014, 0.0045), (0, 0.034, 0.0045), "metal_cromado", 0.0005)
+    m.caixa((0.016, 0.025, 0.0005), (0, -0.008, 0.0092), "etiqueta")
+    return m
+
+
+def saco_evidencia():
+    m = Modelo("saco_evidencia")
+    m.caixa((0.22, 0.3, 0.004), (0, 0, 0.002), "metal_rosado", 0.001)
+    m.caixa((0.22, 0.006, 0.002), (0, 0.13, 0.005), "plastico_branco")
+    m.caixa((0.12, 0.07, 0.0006), (0, 0.05, 0.0043), "etiqueta")
+    m.caixa((0.22, 0.012, 0.0008), (0, 0.1, 0.0045), "plastico_vermelho")  # faixa de lacre
+    return m
+
+
+def fita_lacre():
+    m = Modelo("fita_lacre")
+    m.cilindro(0.045, 0.045, 0.05, (0, 0, 0.025), "plastico_vermelho", segs=20)
+    m.cilindro(0.021, 0.021, 0.052, (0, 0, 0.025), "plastico_branco", segs=14)
+    m.caixa((0.05, 0.002, 0.048), (0.045, 0.02, 0.025), "plastico_vermelho", rot=(0, 0, -0.5))
+    return m
+
+
+def etiquetas_caneta():
+    m = Modelo("etiquetas_caneta")
+    m.caixa((0.1, 0.07, 0.008), (0, 0, 0.004), "etiqueta", 0.001)
+    m.cilindro(0.005, 0.005, 0.14, (0.0, -0.05, 0.006), "plastico_azul", segs=8, rot=(0, math.pi / 2, 0.1))
+    m.cilindro(0.005, 0.001, 0.015, (0.077, -0.042, 0.006), "metal_cromado", segs=8, rot=(0, math.pi / 2, 0.1))
+    return m
+
+
+def oficio_prancheta():
+    m = Modelo("oficio_prancheta")
+    m.caixa((0.23, 0.32, 0.004), (0, 0, 0.002), "madeira_escura", 0.002)
+    m.caixa((0.21, 0.28, 0.002), (0, -0.01, 0.005), "papel", 0.0005)
+    m.caixa((0.19, 0.25, 0.0005), (0, -0.015, 0.0062), "documento")
+    m.caixa((0.09, 0.025, 0.012), (0, 0.145, 0.009), "metal_cromado", 0.003)
+    return m
+
+
+def caixa_luvas():
+    m = Modelo("caixa_luvas")
+    m.caixa((0.24, 0.12, 0.065), (0, 0, 0.0325), "papelao_azul", 0.002)
+    m.caixa((0.12, 0.04, 0.02), (0, 0, 0.07), "luva", 0.008, segs=2)
+    return m
+
+
+def pulseira_esd():
+    m = Modelo("pulseira_esd")
+    anel(m, 0.03, 0.005, (0, 0, 0.005), "tecido_azul", segs=12)
+    m.caixa((0.016, 0.014, 0.01), (0.03, 0, 0.005), "metal_cromado", 0.002)
+    anel(m, 0.04, 0.0015, (0.08, 0.0, 0.002), "plastico_azul", segs=14, frac=0.8, z_passo=0.01)
+    m.caixa((0.02, 0.01, 0.01), (0.12, 0.0, 0.005), "plastico_preto", 0.002)  # jacaré
+    return m
+
+
+def maleta_pericial():
+    """Maleta rígida aberta (55 × 40 cm): casco, tampa aberta, espuma com recortes."""
+    m = Modelo("maleta_pericial")
+    w, d = 0.55, 0.4
+    m.caixa((w, d, 0.12), (0, 0, 0.06), "plastico_escuro", 0.012, segs=2)
+    m.caixa((w - 0.03, d - 0.03, 0.01), (0, 0, 0.118), "espuma", 0.004)
+    for x, y, sx, sy in [(-0.17, 0.08, 0.14, 0.09), (0.0, 0.1, 0.1, 0.06), (0.17, 0.08, 0.12, 0.1), (-0.15, -0.09, 0.18, 0.06), (0.1, -0.09, 0.2, 0.08)]:
+        m.caixa((sx, sy, 0.004), (x, y, 0.123), "plastico_preto")
+    # tampa aberta, inclinada para trás (+Y no Blender = frente no jogo; a tampa vai para -Y)
+    m.caixa((w, 0.03, d), (0, -d / 2 - 0.01, 0.12 + d / 2 - 0.02), "plastico_escuro", 0.012, rot=(-0.25, 0, 0), segs=2)
+    m.caixa((w - 0.04, 0.012, d - 0.04), (0, -d / 2 + 0.01, 0.12 + d / 2 - 0.02), "espuma", rot=(-0.25, 0, 0))
+    for sx in (-1, 1):
+        m.caixa((0.04, 0.02, 0.03), (sx * 0.18, d / 2 + 0.008, 0.085), "metal_cromado", 0.004)  # fechos
+    m.caixa((0.14, 0.03, 0.02), (0, d / 2 + 0.02, 0.06), "borracha", 0.008)  # alça
+    m.caixa((0.12, 0.002, 0.04), (0.18, d / 2 + 0.001, 0.05), "etiqueta")
+    return m
+
+
+def extintor():
+    m = Modelo("extintor")
+    m.cilindro(0.075, 0.075, 0.5, (0, 0, 0.25), "plastico_vermelho", segs=18)
+    m.cilindro(0.075, 0.03, 0.06, (0, 0, 0.53), "plastico_vermelho", segs=18)
+    m.cilindro(0.02, 0.02, 0.06, (0, 0, 0.58), "metal_cromado", segs=10)
+    m.caixa((0.1, 0.02, 0.015), (0.03, 0, 0.615), "metal_escuro", 0.004)
+    m.cilindro(0.01, 0.01, 0.35, (-0.07, 0.03, 0.4), "borracha", segs=8, rot=(0.05, 0.25, 0))
+    m.caixa((0.09, 0.002, 0.12), (0, 0.076, 0.3), "etiqueta")
+    m.caixa((0.16, 0.04, 0.02), (0, -0.09, 0.55), "metal_escuro", 0.004)  # suporte de parede
+    return m
+
+
+def relogio_parede():
+    m = Modelo("relogio_parede")
+    m.cilindro(0.16, 0.16, 0.04, (0, 0, 0.16), "plastico_preto", segs=28, rot=(math.pi / 2, 0, 0))
+    # mostrador redondo com UV 0..1 (u invertido, como em `tela`)
+    n, r, cz, y = 28, 0.145, 0.16, 0.0205
+    vs = [m.bm.verts.new((r * math.cos(k / n * math.tau), y, cz + r * math.sin(k / n * math.tau))) for k in range(n)]
+    f = m.bm.faces.new(vs)
+    f.material_index = m._mat("relogio")
+    f[m.fix] = 1
+    f.normal_update()
+    if f.normal.y < 0:
+        f.normal_flip()
+    for loop in f.loops:
+        c = loop.vert.co
+        loop[m.uv].uv = (0.5 - (c.x / (2 * r)), 0.5 + (c.z - cz) / (2 * r))
+    return m
+
+
+def quadro_parede(nome, w, h, mat_img, moldura="madeira_escura", prof=0.025):
+    """Quadro/cartaz de parede: moldura e imagem frontal (UV 0..1). Origem no centro da base."""
+    m = Modelo(nome)
+    b = 0.025
+    m.caixa((w, prof, b), (0, 0, b / 2), moldura, 0.004)
+    m.caixa((w, prof, b), (0, 0, h - b / 2), moldura, 0.004)
+    m.caixa((b, prof, h), (-w / 2 + b / 2, 0, h / 2), moldura, 0.004)
+    m.caixa((b, prof, h), (w / 2 - b / 2, 0, h / 2), moldura, 0.004)
+    m.caixa((w - 2 * b, 0.006, h - 2 * b), (0, -0.006, h / 2), "plastico_branco")
+    m.tela(-w / 2 + b, w / 2 - b, b, h - b, prof / 2 - 0.009, mat=mat_img)
+    return m
+
+
+def lixeira():
+    m = Modelo("lixeira")
+    m.cilindro(0.13, 0.15, 0.35, (0, 0, 0.175), "plastico_cinza", segs=18)
+    m.cilindro(0.155, 0.155, 0.02, (0, 0, 0.355), "plastico_escuro", segs=18)
+    m.cilindro(0.11, 0.11, 0.01, (0, 0, 0.37), "plastico_amarelo", segs=14)  # risco biológico
+    return m
+
+
+def cinzeiro():
+    m = Modelo("cinzeiro")
+    m.cilindro(0.055, 0.05, 0.025, (0, 0, 0.0125), "vidro", segs=16)
+    m.cilindro(0.042, 0.042, 0.004, (0, 0, 0.022), "concreto_cinza", segs=14)
+    m.cilindro(0.004, 0.004, 0.03, (0.01, 0.0, 0.03), "papel", segs=6, rot=(0, 1.3, 0.4))  # bituca
+    m.cilindro(0.0042, 0.0042, 0.009, (0.024, 0.006, 0.026), "plastico_laranja", segs=6, rot=(0, 1.3, 0.4))
+    return m
+
+
+def copo_cafe():
+    m = Modelo("copo_cafe")
+    m.cilindro(0.032, 0.042, 0.1, (0, 0, 0.05), "papel", segs=14)
+    m.cilindro(0.04, 0.04, 0.003, (0, 0, 0.088), "cafe", segs=14)
+    m.caixa((0.02, 0.002, 0.008), (0, 0.042, 0.096), "batom", 0.001)
+    return m
+
+
+def porta_retrato():
+    m = Modelo("porta_retrato")
+    m.caixa((0.14, 0.012, 0.11), (0, 0, 0.055), "madeira_escura", 0.004, rot=(-0.2, 0, 0))
+    m.tela(-0.06, 0.06, 0.012, 0.098, 0.007, mat="pintura", inclinacao=-0.2, pivo=(0, 0, 0))
+    m.caixa((0.02, 0.06, 0.004), (0, -0.03, 0.03), "madeira_escura", rot=(0.9, 0, 0))
+    return m
+
+
 MODELOS = [
     cadeira_escritorio,
     lambda: mesa("mesa_escritorio", 1.8, 0.76, 0.8, tampo="madeira", pes="madeira_escura", pes_madeira=True),
@@ -608,6 +938,42 @@ MODELOS = [
     ssd_25,
     pendrive,
     tablet_perito,
+    maos,
+    chave_phillips,
+    tesoura,
+    lanterna,
+    placa_vestigio,
+    regua_escala,
+    cabo_sata,
+    cabo_usb,
+    cabo_branco,
+    adaptador_m2,
+    leitor_sd,
+    bateria_externa,
+    faraday_bag,
+    papel_aluminio,
+    ejetor_sim,
+    pendrive_coleta,
+    saco_evidencia,
+    fita_lacre,
+    etiquetas_caneta,
+    oficio_prancheta,
+    caixa_luvas,
+    pulseira_esd,
+    maleta_pericial,
+    extintor,
+    relogio_parede,
+    lambda: quadro_parede("quadro_cortica", 1.2, 0.8, "cortica"),
+    lambda: quadro_parede("quadro_branco", 1.4, 0.85, "quadrobranco", moldura="metal_claro"),
+    lambda: quadro_parede("cartaz_pop", 0.6, 0.85, "cartazpop", moldura="metal_escuro", prof=0.015),
+    lambda: quadro_parede("cartaz_epi", 0.5, 0.7, "cartazepi", moldura="metal_escuro", prof=0.015),
+    lambda: quadro_parede("pintura_parede", 0.9, 0.6, "pintura"),
+    lambda: quadro_parede("calendario", 0.35, 0.5, "calendario", moldura="plastico_branco", prof=0.008),
+    lambda: quadro_parede("placa_lab", 1.3, 0.22, "placalab", moldura="metal_escuro", prof=0.012),
+    lixeira,
+    cinzeiro,
+    copo_cafe,
+    porta_retrato,
 ]
 
 

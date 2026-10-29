@@ -4,7 +4,7 @@ Esta pasta guarda os modelos 3D do Perícia Sim e recebe texturas/modelos fornec
 
 ## Modelos incluídos (gerados no Blender 5.2)
 
-`models/` traz 23 modelos OBJ/MTL gerados pelo script `tools/blender/gerar_modelos.py`; a fonte editável é `blender/modelos.blend`. Cerca de 12 300 triângulos no total.
+`models/` traz 68 modelos OBJ/MTL gerados pelo script `tools/blender/gerar_modelos.py`; a fonte editável é `blender/modelos.blend`. Cerca de 22 000 triângulos no total.
 
 | Arquivo | Onde aparece | Triângulos |
 |---|---|---|
@@ -98,3 +98,21 @@ A cena usa **metros**, Y para cima. A malha do macroquad usa índices de 16 bits
 | Ações periciais | `foto`, `papel`, `deslacrar`, `lacre_aplicar`, `abrir_gabinete`, `componente_remover`, `midia_remover`, `bloqueio`, `aquisicao`, `hash`, `energia_desligar`, `rede_isolar`, `digitacao`, `faraday`, `aluminio`, `celular_toque`, `celular_carregar`, `sim_remover`, `extracao`, `embalar`, `etiquetar`, `inspecionar`, `caneta` |
 
 Um WAV com o mesmo nome substitui o som gerado (16 bits, mono ou estéreo; outras taxas são reamostradas). Sem a pasta, o jogo roda em silêncio.
+
+## Modelos da v0.8 (passo a passo)
+
+Também gerados por `tools/blender/gerar_modelos.py`:
+
+| Grupo | Modelos |
+|---|---|
+| Perito | `maos` (mão direita em empunhadura com manga; o material `pele` vira luva azul quando calçada) |
+| Ferramentas | `chave_phillips`, `tesoura`, `lanterna`, `placa_vestigio`, `regua_escala`, `cabo_sata`, `cabo_usb`, `cabo_branco` (USB-C/Lightning), `adaptador_m2`, `leitor_sd`, `bateria_externa`, `faraday_bag`, `papel_aluminio`, `ejetor_sim`, `pendrive_coleta`, `saco_evidencia`, `fita_lacre`, `etiquetas_caneta`, `oficio_prancheta`, `caixa_luvas`, `pulseira_esd`, `maleta_pericial` |
+| Cena | `extintor`, `relogio_parede`, `quadro_cortica`, `quadro_branco`, `cartaz_pop`, `cartaz_epi`, `pintura_parede`, `calendario`, `placa_lab`, `lixeira`, `cinzeiro`, `copo_cafe`, `porta_retrato` |
+
+## Imagens (`textures/`) e ícones (`icons/`)
+
+`tools/texturas/gerar_texturas.py` desenha (PIL, sem fotos de terceiros) os cartazes, o quadro branco, o quadro de cortiça, a pintura, o calendário, a placa do laboratório, o mostrador do relógio, o ofício e a mancha de sangue seco (`mancha.png`, com transparência). `tools/blender/renderizar_icones.py` gera os ícones 128×128 das ferramentas, usados na maleta, no painel de etapas e no canto da tela.
+
+## Música (`sounds/musica_noir.wav`)
+
+Jazz noir original de 126 s em ré menor, 76 bpm, em loop sem emenda (estéreo, 22,05 kHz): `tools/audio/gerar_musica.py` compõe a forma (introdução, A, A', B, A, final), o walking do contrabaixo, a bateria com vassourinhas, o piano elétrico e a melodia do sax, e sintetiza tudo — nenhum trecho é amostrado.

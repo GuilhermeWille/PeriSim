@@ -14,6 +14,7 @@ mod audio;
 mod config;
 mod sfx;
 mod video;
+mod maleta;
 mod world;
 mod ui;
 
@@ -22,6 +23,7 @@ use macroquad::prelude::*;
 use pericia_core::casegen::{generate, parse_case_id};
 use pericia_core::engine::Sim;
 use pericia_core::model::*;
+use pericia_core::equip::Tool;
 use ui::*;
 
 fn conf() -> macroquad::conf::Conf {
@@ -105,6 +107,9 @@ pub struct App {
     pub step_n: u32,
     pub key_n: u32,
     pub config: config::ConfigUi,
+    pub maleta: maleta::MaletaUi,
+    /// Ícones das ferramentas (assets/icons).
+    pub icons: std::collections::HashMap<String, Texture2D>,
     /// Legenda exibida em roteiros de demonstração (gravação de vídeo).
     pub caption: Option<String>,
 }
@@ -365,6 +370,12 @@ fn draw_menu(app: &mut App) {
         config::open(app);
     }
     y += 40.0 * s;
+    let ml = if app.settings.music_on { "♪  Música ambiente: ligada (clique para desligar)" } else { "♪  Música ambiente: desligada (clique para ligar)" };
+    if app.ui.button(rect(col2.x + 16.0 * s, y, col2.w - 32.0 * s, 30.0 * s), ml) {
+        app.settings.music_on = !app.settings.music_on;
+        save::save_settings(&app.settings);
+    }
+    y += 40.0 * s;
     let howto = "Como jogar\n• Área de Hardware: gire a câmera com o botão direito, aproxime com a roda e clique nos equipamentos. Cada ação física vira um comando no terminal.\n• Estação Pericial: clique no PC ao fundo ou na aba superior. No PeritOS você examina as imagens, navega na rede emulada e redige o documento.\n• Encontrar a expressão-alvo não basta: procedimento, preservação e fundamentação são avaliados.";
     let lines = app.ui.wrap(howto, 11.5, F::Reg, col2.w - 32.0 * s);
     for l in lines {
@@ -506,6 +517,18 @@ fn hardware(app: &mut App, area: Rect) {
         return;
     }
     let typing = matches!(app.ui.focus.as_deref(), Some("term") | Some("pin") | Some("seed"));
+    if maleta::keys(app) {
+        let clicked = app.ui.clicked && !app.ui.click_consumed;
+        let wheel = app.ui.wheel;
+        app.ui.click_consumed = true;
+        app.ui.wheel = 0.0;
+        hardware_inner(app, area, true);
+        app.ui.click_consumed = !clicked;
+        app.ui.wheel = wheel;
+        app.ui.tooltip = None;
+        maleta::draw(app, area);
+        return;
+    }
     if tablet::keys(app, typing) {
         // tablet em mãos: a cena segue desenhada (sem o tablet 3D), sem receber entrada
         let clicked = app.ui.clicked && !app.ui.click_consumed;
@@ -584,8 +607,8 @@ fn hardware_inner(app: &mut App, area: Rect, modal: bool) {
         fog: vec3(0.55, 0.57, 0.60),
         fog_den: 0.018,
     };
-    if !app.tablet.open && app.phone.open.is_none() && app.settings.held_tablet {
-        held_tablet(&mut r, &cam);
+    if !app.tablet.open && app.phone.open.is_none() && !app.maleta.open && app.settings.held_tablet {
+        held_hand(&mut r, &cam, sim.equip.hand, sim.equip.gloves != pericia_core::equip::Gloves::Nenhuma);
     }
     // ouvinte e posições dos objetos para o som 3D
     let right = (cam.target - cam.position).cross(vec3(0.0, 1.0, 0.0)).normalize_or_zero();
@@ -636,7 +659,23 @@ fn hardware_inner(app: &mut App, area: Rect, modal: bool) {
     app.hover_pick = best.filter(|(t, _)| *t <= REACH).map(|(_, i)| wrld.picks[i].id.clone());
     // rótulos flutuantes dos itens próximos
     for p in &wrld.picks {
-        if !p.id.starts_with("ITEM") {
+        // placas numeradas: o número fica legível de perto
+        if p.id.starts_with("V-") {
+            if let Some(n) = app.sim.as_ref().and_then(|x| x.equip.markers.get(&p.id).copied()) {
+                if (p.center - cam.position).length() < 3.5 && !modal {
+                    if let Some(sp) = world::project(&cam, view, p.center + vec3(0.2, 0.14, 0.18)) {
+                        if view.contains(sp) {
+                            let t = format!("{}", n);
+                            let rr = rect(sp.x - 9.0 * s, sp.y - 9.0 * s, 18.0 * s, 18.0 * s);
+                            app.ui.frame(rr, Color::new(0.95, 0.78, 0.1, 0.95), Color::new(0.2, 0.15, 0.0, 1.0));
+                            let tw = app.ui.measure(&t, 11.0, F::Bold);
+                            app.ui.text(&t, rr.x + (rr.w - tw) / 2.0, rr.y + 13.5 * s, 11.0, F::Bold, BLACK);
+                        }
+                    }
+                }
+            }
+        }
+        if !p.id.starts_with("ITEM") && !p.id.starts_with("V-") {
             continue;
         }
         let dist = (p.center - cam.position).length();
@@ -689,6 +728,10 @@ fn hardware_inner(app: &mut App, area: Rect, modal: bool) {
     }
     let clicked = app.ui.click_in(view);
     let pressed_e = !typing && is_key_pressed(KeyCode::E);
+    if !typing && !modal && is_key_pressed(KeyCode::G) && app.sim.as_ref().map(|x| x.strict && x.equip.hand.is_some()).unwrap_or(false) {
+        let out = app.run("guardar");
+        app.toast(out.lines().next().unwrap_or(""));
+    }
     if clicked || pressed_e {
         match best.filter(|(t, _)| *t <= REACH).map(|(_, i)| wrld.picks[i].clone()) {
             Some(p) if p.id == "STATION" => {
@@ -697,6 +740,20 @@ fn hardware_inner(app: &mut App, area: Rect, modal: bool) {
                 app.area = Area::Station;
                 app.station_zoom = true;
                 app.toast("Você se sentou na estação pericial.");
+            }
+            Some(p) if p.id == "MALETA" || p.id == "TOOL-BAG" => {
+                maleta::open(app);
+            }
+            Some(p) if p.id == "TOOL-CAM" && app.sim.as_ref().map(|x| x.strict).unwrap_or(false) => {
+                let out = app.run("pegar camera");
+                app.toast(out.lines().next().unwrap_or(""));
+            }
+            Some(p) if p.id.starts_with("V-") => {
+                app.selected = Some(p.id.clone());
+                app.panel_scroll = 0.0;
+                if app.player.captured {
+                    app.player.set_captured(false);
+                }
             }
             Some(p) if p.id.starts_with("ITEM") => {
                 sfx::interact(app, &p.id, p.center);
@@ -722,11 +779,59 @@ fn hardware_inner(app: &mut App, area: Rect, modal: bool) {
         }
     }
     // dica discreta (controles completos: tablet → Apoio → Controles)
-    if !modal && app.settings.show_hints {
-        hint_chips(app, view);
+    if !modal {
+        hud(app, view);
     }
     if show_panel {
         side_panel(app, rect(area.x + view.w, area.y, panel_w, area.h));
+    }
+}
+
+/// HUD: ícone do tablet (T) à esquerda; à direita, o que está na mão, luvas e pulseira.
+fn hud(app: &mut App, view: Rect) {
+    let s = app.ui.scale;
+    // tablet como ícone: só sai do bolso quando chamado
+    let tb = rect(view.x + 12.0 * s, view.y + view.h - 70.0 * s, 58.0 * s, 58.0 * s);
+    let hov = app.ui.hover(tb);
+    draw_rectangle(tb.x, tb.y, tb.w, tb.h, Color::new(0.0, 0.0, 0.0, if hov { 0.6 } else { 0.38 }));
+    draw_rectangle_lines(tb.x, tb.y, tb.w, tb.h, 1.0, Color::new(1.0, 1.0, 1.0, if hov { 0.7 } else { 0.3 }));
+    maleta::draw_icon(app, "tablet_perito", rect(tb.x + 4.0 * s, tb.y + 2.0 * s, tb.w - 8.0 * s, tb.h - 14.0 * s));
+    app.ui.text("T", tb.x + 4.0 * s, tb.y + tb.h - 3.0 * s, 10.0, F::Bold, Color::new(1.0, 0.75, 0.3, 1.0));
+    app.ui.text("tablet", tb.x + 16.0 * s, tb.y + tb.h - 3.0 * s, 9.5, F::Reg, Color::new(1.0, 1.0, 1.0, 0.75));
+    if app.ui.click_in(tb) {
+        tablet::open(app);
+    }
+    if app.settings.show_hints {
+        hint_chips(app, rect(view.x + 66.0 * s, view.y, view.w, view.h));
+    }
+    let Some(sim) = app.sim.as_ref() else { return };
+    if !sim.strict {
+        return;
+    }
+    let hand = sim.equip.hand;
+    let gloves = sim.equip.gloves.clone();
+    let strap = sim.equip.strap;
+    let w = 250.0 * s;
+    let hr = rect(view.x + view.w - w - 12.0 * s, view.y + view.h - 70.0 * s, w, 58.0 * s);
+    draw_rectangle(hr.x, hr.y, hr.w, hr.h, Color::new(0.0, 0.0, 0.0, 0.42));
+    draw_rectangle_lines(hr.x, hr.y, hr.w, hr.h, 1.0, Color::new(1.0, 1.0, 1.0, 0.25));
+    let ib = rect(hr.x + 4.0 * s, hr.y + 4.0 * s, 50.0 * s, 50.0 * s);
+    match hand {
+        Some(t) => maleta::draw_icon(app, maleta::icon_name(t), ib),
+        None => app.ui.text("—", ib.x + 16.0 * s, ib.y + 32.0 * s, 18.0, F::Bold, Color::new(1.0, 1.0, 1.0, 0.5)),
+    }
+    let nome = hand.map(pericia_core::equip::tool_name).unwrap_or("Mãos livres");
+    let nome = phone::clip_text(&app.ui, nome, 12.0, F::Bold, hr.w - 66.0 * s);
+    app.ui.text(&nome, hr.x + 60.0 * s, hr.y + 20.0 * s, 12.0, F::Bold, T.text);
+    let (gl, gc) = match &gloves {
+        pericia_core::equip::Gloves::Nenhuma => ("sem luvas", T.warn),
+        pericia_core::equip::Gloves::Limpas => ("luvas", Color::new(0.45, 0.65, 1.0, 1.0)),
+        pericia_core::equip::Gloves::Contaminadas(_) => ("luvas sujas!", T.bad),
+    };
+    app.ui.text(gl, hr.x + 60.0 * s, hr.y + 38.0 * s, 10.5, F::Bold, gc);
+    app.ui.text(if strap { "pulseira ESD" } else { "sem pulseira" }, hr.x + 140.0 * s, hr.y + 38.0 * s, 10.5, F::Bold, if strap { T.ok } else { T.dim });
+    if hand.is_some() {
+        app.ui.text("G guardar", hr.x + 60.0 * s, hr.y + 52.0 * s, 9.5, F::Reg, Color::new(1.0, 1.0, 1.0, 0.6));
     }
 }
 
@@ -734,43 +839,73 @@ fn hardware_inner(app: &mut App, area: Rect, modal: bool) {
 fn hint_chips(app: &mut App, view: Rect) {
     let s = app.ui.scale;
     let look = if app.player.captured { ("Tab", "soltar o mouse") } else { ("Btn. dir.", "olhar") };
-    let chips = [("T", "Tablet"), ("E", "Interagir"), look];
+    let chips = [("E", "Interagir / maleta"), look];
     let mut x = view.x + 12.0 * s;
     let y = view.y + view.h - 30.0 * s;
     for (k, (key, what)) in chips.iter().enumerate() {
         let kw = app.ui.measure(key, 10.5, F::Bold) + 10.0 * s;
         let ww = app.ui.measure(what, 10.5, F::Reg) + 10.0 * s;
         let r = rect(x, y, kw + ww, 20.0 * s);
-        let hov = k == 0 && app.ui.hover(r);
+        let hov = false;
         draw_rectangle(r.x, r.y, r.w, r.h, Color::new(0.0, 0.0, 0.0, if hov { 0.6 } else { 0.32 }));
         draw_rectangle_lines(r.x, r.y, kw, r.h, 1.0, Color::new(1.0, 1.0, 1.0, 0.35));
         app.ui.text(key, r.x + 5.0 * s, r.y + 14.5 * s, 10.5, F::Bold, Color::new(1.0, 1.0, 1.0, 0.85));
         app.ui.text(what, r.x + kw + 5.0 * s, r.y + 14.5 * s, 10.5, F::Reg, Color::new(1.0, 1.0, 1.0, 0.7));
-        if k == 0 && app.ui.click_in(r) {
-            tablet::open(app);
-        }
+        let _ = k;
         x += r.w + 6.0 * s;
     }
 }
 
-/// Tablet do perito em mãos (canto inferior direito da visão), preso à câmera.
-fn held_tablet(r: &mut render::Renderer, cam: &Camera3D) {
+/// Modelo e pose de cada ferramenta na mão (no referencial da mão: x à direita, y para cima,
+/// z para trás). `kind`: 0 = haste apontada para a frente, 1 = objeto plano voltado para o
+/// perito, 2 = câmera erguida.
+fn tool_pose(t: Tool) -> (&'static str, u8, f32) {
+    match t {
+        Tool::Camera => ("camera_foto", 2, 0.8),
+        Tool::Oficio => ("oficio_prancheta", 1, 0.55),
+        Tool::Tesoura => ("tesoura", 3, 1.0),
+        Tool::Chave => ("chave_phillips", 0, 1.0),
+        Tool::Lanterna => ("lanterna", 0, 1.0),
+        Tool::Placas => ("placa_vestigio", 1, 1.0),
+        Tool::CaboSata => ("cabo_sata", 1, 1.0),
+        Tool::AdaptadorM2 => ("adaptador_m2", 1, 1.0),
+        Tool::LeitorSd => ("leitor_sd", 1, 1.2),
+        Tool::CaboUsb => ("cabo_usb", 1, 1.0),
+        Tool::CaboUsbC | Tool::CaboLightning => ("cabo_branco", 1, 1.0),
+        Tool::Bateria => ("bateria_externa", 1, 1.0),
+        Tool::Faraday => ("faraday_bag", 1, 1.0),
+        Tool::Aluminio => ("papel_aluminio", 1, 0.6),
+        Tool::Ejetor => ("ejetor_sim", 1, 1.6),
+        Tool::PendriveColeta => ("pendrive_coleta", 1, 1.4),
+        Tool::Saco => ("saco_evidencia", 1, 0.55),
+        Tool::FitaLacre => ("fita_lacre", 1, 1.0),
+        Tool::Etiquetas => ("etiquetas_caneta", 1, 1.0),
+    }
+}
+
+/// Mão direita do perito (com luvas, se calçadas) e a ferramenta que ela segura.
+fn held_hand(r: &mut render::Renderer, cam: &Camera3D, tool: Option<Tool>, gloves: bool) {
     let f = (cam.target - cam.position).normalize();
     let rt = f.cross(vec3(0.0, 1.0, 0.0)).normalize_or_zero();
     if rt == Vec3::ZERO {
         return;
     }
     let up = rt.cross(f);
-    // tela inclinada para o perito; segurado baixo e à direita
-    let a: f32 = 1.0;
-    let n = up * a.cos() - f * a.sin();
-    let b = -f * a.cos() - up * a.sin();
-    let pos = cam.position + f * 0.42 - up * 0.32 + rt * 0.31;
-    let yaw = Mat3::from_axis_angle(n, 0.35); // gira levemente para o centro
-    let (x, y, z) = (yaw * rt, n, yaw * b);
-    let m = Mat4::from_cols(x.extend(0.0), y.extend(0.0), z.extend(0.0), pos.extend(1.0)) * Mat4::from_translation(vec3(0.0, -0.007, 0.0));
-    let tela = render::emis(render::Tex::Screen, render::rgb(70, 110, 150));
-    r.model_held("tablet_perito", m, &[("tela", tela)]);
+    let pos = cam.position + f * 0.34 - up * 0.215 + rt * 0.205;
+    let basis = Mat4::from_cols(rt.extend(0.0), up.extend(0.0), (-f).extend(0.0), pos.extend(1.0));
+    let hand = basis * Mat4::from_rotation_y(0.35) * Mat4::from_rotation_x(-0.2);
+    let pele = if gloves { render::m(render::Tex::Plastic, render::rgb(70, 110, 205), 0.3, 0.45) } else { render::m(render::Tex::White, render::rgb(205, 152, 118), 1.0, 0.25) };
+    r.model_held("maos", hand, &[("pele", pele), ("pele_unha", pele)]);
+    let Some(t) = tool else { return };
+    let (name, kind, sc) = tool_pose(t);
+    let grip = Mat4::from_translation(vec3(-0.02, 0.0, -0.04));
+    let local = match kind {
+        0 => grip * Mat4::from_rotation_x(-std::f32::consts::FRAC_PI_2) * Mat4::from_translation(vec3(0.0, -0.055, 0.0)),
+        2 => Mat4::from_translation(vec3(-0.09, 0.07, -0.08)) * Mat4::from_rotation_y(std::f32::consts::PI + 0.2) * Mat4::from_translation(vec3(0.0, -0.05, 0.0)),
+        3 => grip * Mat4::from_rotation_y(std::f32::consts::PI) * Mat4::from_rotation_x(0.6) * Mat4::from_translation(vec3(0.0, 0.0, -0.01)),
+        _ => grip * Mat4::from_translation(vec3(-0.06, 0.0, 0.01)) * Mat4::from_rotation_x(1.15) * Mat4::from_rotation_z(0.35),
+    } * Mat4::from_scale(Vec3::splat(sc));
+    r.model_held(name, hand * local, &[]);
 }
 
 /// Painel compacto de ações do objeto selecionado (o estado detalhado está no tablet).
@@ -785,6 +920,10 @@ fn side_panel(app: &mut App, panel: Rect) {
     if app.ui.button(close_r, "✕") {
         app.selected = None;
         app.show_help_overlay = false;
+        return;
+    }
+    if let Some(vid) = app.selected.clone().filter(|x| x.starts_with("V-")) {
+        vestigio_panel(app, panel, &vid);
         return;
     }
     match sel {
@@ -851,31 +990,230 @@ fn side_panel(app: &mut App, panel: Rect) {
             }
             app.ui.text("AÇÕES", panel.x + pad, y + 10.0 * s, 10.5, F::Bold, T.dim);
             y += 16.0 * s;
-            let acts = item_actions(app.sim.as_ref().unwrap(), &it);
-            let bw = (panel.w - pad * 2.0 - 6.0 * s) / 2.0;
-            let bh = 28.0 * s;
-            for (i, (l, c, en)) in acts.iter().enumerate() {
-                let r = rect(panel.x + pad + (i % 2) as f32 * (bw + 6.0 * s), y + (i / 2) as f32 * (bh + 5.0 * s), bw, bh);
-                if r.y + r.h > panel.y + panel.h - 4.0 * s {
-                    break;
-                }
-                if app.ui.hover(r) {
-                    app.ui.tooltip = Some(c.clone());
-                }
-                if app.ui.button_c(r, l, if c == "@tela" { T.accent2 } else { T.panel2 }, *en) {
-                    if c == "@tela" {
-                        app.phone.close();
-                        app.phone.open = Some(it.id.clone());
-                    } else {
-                        app.run(c);
-                    }
+            let sim = app.sim.as_ref().unwrap();
+            let acts = if sim.strict { strict_actions(sim, &it) } else { item_actions(sim, &it) };
+            draw_actions(app, panel, y, acts, &it.id);
+        }
+    }
+}
+
+/// Etapas físicas na ordem real (modo passo a passo): cada botão é um comando do motor.
+fn strict_actions(sim: &Sim, it: &Item) -> Vec<(String, String, bool)> {
+    use pericia_core::equip::{cover_screws, media_free, slot_has_cables, slot_screws};
+    let id = it.id.to_lowercase();
+    let eq = &sim.equip;
+    let mut v: Vec<(String, String, bool)> = vec![];
+    let add = |v: &mut Vec<(String, String, bool)>, l: &str, c: String, en: bool| v.push((l.to_string(), c, en));
+    add(&mut v, "Fotografar", format!("fotografar {}", id), true);
+    if it.seal.is_some() || it.doc_seal.is_some() {
+        add(&mut v, "Conferir lacre × ofício", format!("lacre conferir {}", id), true);
+        if it.seal.as_ref().map(|s| s.intact).unwrap_or(false) {
+            add(&mut v, "Romper o lacre", format!("deslacrar {}", id), true);
+        }
+    }
+    add(&mut v, "Inspecionar (lanterna)", format!("inspecionar {}", id), true);
+    if it.kind.is_computer() {
+        if let Some(live) = &it.live {
+            if it.power_on {
+                add(&mut v, "Isolar da rede (cabo)", format!("rede isolar {}", id), live.network_connected);
+                add(&mut v, "Coletar memória", format!("memoria {}", id), live.memory_dump.is_none());
+                add(&mut v, "Copiar volume montado", format!("volume copiar {}", id), live.mounted_encrypted.is_some());
+            }
+        }
+        if it.power_on {
+            add(&mut v, "Desligar (energia)", format!("energia desligar {}", id), true);
+        }
+        let total = cover_screws(it);
+        let done = *eq.screws.get(&it.id).unwrap_or(&0);
+        if !it.flag("aberto") && total > 0 {
+            if done < total {
+                add(&mut v, &format!("Soltar parafuso da tampa ({}/{})", done + 1, total), format!("desparafusar {}", id), !it.power_on);
+            } else {
+                add(&mut v, "Retirar a tampa", format!("abrir {}", id), true);
+            }
+        }
+        if it.flag("aberto") {
+            for c in &it.components {
+                if c.kind != "tampa" && !c.removed {
+                    add(&mut v, &format!("Remover {}", c.label.to_lowercase()), format!("componente remover {} {}", id, c.id), true);
                 }
             }
-            if let Some(tt) = app.ui.tooltip.clone() {
-                app.hover_label = Some(format!("comando: {}", tt));
+            for sl in &it.slots {
+                let (Some(m), None) = (&sl.media_id, &sl.hidden_by) else { continue };
+                if eq.removed.contains(m) {
+                    continue;
+                }
+                let key = format!("{}:{}", it.id, sl.id.to_uppercase());
+                if slot_has_cables(it, sl) {
+                    for c in ["dados", "energia"] {
+                        if !eq.unplugged.contains(&format!("{}:{}", key, c)) {
+                            add(&mut v, &format!("Desconectar cabo de {} ({})", c, sl.id), format!("cabo desconectar {} {} {}", id, sl.id.to_lowercase(), c), true);
+                        }
+                    }
+                }
+                let st = slot_screws(&sim.case, it, sl);
+                let sd = *eq.screws.get(&key).unwrap_or(&0);
+                if sd < st {
+                    add(&mut v, &format!("Soltar parafuso do suporte {} ({}/{})", sl.id, sd + 1, st), format!("desparafusar {} {}", id, sl.id.to_lowercase()), true);
+                }
+                add(&mut v, &format!("Retirar a mídia {} ({})", m, sl.id), format!("midia remover {} {}", id, sl.id.to_lowercase()), true);
             }
         }
     }
+    if let Some(ph) = &it.phone {
+        add(&mut v, "▣ Ver a tela do aparelho", "@tela".into(), true);
+        add(&mut v, "Isolar: Faraday bag", format!("isolar {} faraday", id), !ph.rf.isolates());
+        add(&mut v, "Isolar: alumínio (3 camadas)", format!("isolar {} aluminio", id), !ph.rf.isolates());
+        add(&mut v, "Modo avião", format!("airplane {}", id), !ph.airplane);
+        add(&mut v, "Ligar à bateria externa", format!("carregar {}", id), !ph.charging);
+        add(&mut v, "Desabilitar alarmes", format!("alarmes {}", id), !ph.alarms_disabled);
+        for sim_c in &ph.sims {
+            if sim_c.place == SimWhere::Slot {
+                add(&mut v, &format!("Remover SIM (slot {})", sim_c.slot), format!("sim remover {} {}", id, sim_c.slot), true);
+            }
+        }
+        if sim.case.module == ModuleId::M505 {
+            add(&mut v, "Solicitar senhas", format!("solicitar-senhas {}", id), !it.flag("senhas_solicitadas"));
+            add(&mut v, "Etiqueta na câmera frontal", format!("camera cobrir {}", id), !ph.front_camera_covered);
+        } else {
+            add(&mut v, "Extrair (cabo de dados)", format!("extrair {}", id), !ph.wiped);
+            add(&mut v, "Extrair: sistema de arquivos", format!("extrair {} fs", id), !ph.wiped);
+            add(&mut v, "Extrair: lógica", format!("extrair {} logica", id), !ph.wiped);
+        }
+    }
+    // cadeia de aquisição das mídias já acessíveis
+    for mid in &it.media {
+        let Some(m) = sim.case.media_by_id(mid) else { continue };
+        if m.kind == MediaKind::FlashMovel || !media_free(sim, mid) {
+            continue;
+        }
+        let ml = mid.to_lowercase();
+        match eq.linked.get(mid).map(|x| x.as_str()) {
+            None => {
+                add(&mut v, &format!("Conectar {} ao bloqueador", mid), format!("conectar {} bloqueador", ml), true);
+                add(&mut v, &format!("Ligar {} direto na estação ⚠", mid), format!("conectar {} estacao", ml), true);
+            }
+            Some("bloqueador") => {
+                if !eq.blocker_host {
+                    add(&mut v, "Ligar bloqueador à estação (USB)", "conectar bloqueador estacao".into(), true);
+                }
+                if !sim.hashes.contains_key(&format!("wb:{}", mid)) {
+                    add(&mut v, &format!("Ativar bloqueio de escrita ({})", mid), format!("bloqueio {}", ml), true);
+                }
+            }
+            _ => {}
+        }
+        if eq.linked.contains_key(mid) {
+            add(&mut v, &format!("Adquirir imagem {}", mid), format!("imagem {}", ml), !sim.imaged.contains(mid));
+            add(&mut v, &format!("Verificar hash {}", mid), format!("verificar-hash {}", ml), sim.imaged.contains(mid));
+        }
+    }
+    add(&mut v, "Embalar (saco de evidência)", format!("embalar {}", id), !it.flag("embalado"));
+    add(&mut v, "Apor lacre numerado", format!("lacre aplicar {}", id), true);
+    add(&mut v, "Etiquetar", format!("etiquetar {} {}", id, it.label), !it.flag("etiqueta"));
+    v
+}
+
+/// Botões das ações com o requisito físico: ferramenta que falta na mão ou etapa anterior.
+fn draw_actions(app: &mut App, panel: Rect, y0: f32, acts: Vec<(String, String, bool)>, item_id: &str) {
+    let s = app.ui.scale;
+    let pad = 10.0 * s;
+    let bw = panel.w - pad * 2.0;
+    let bh = 27.0 * s;
+    let mut hint: Option<String> = None;
+    for (i, (l, c, en)) in acts.iter().enumerate() {
+        let r = rect(panel.x + pad, y0 + i as f32 * (bh + 4.0 * s), bw, bh);
+        if r.y + r.h > panel.y + panel.h - 40.0 * s {
+            break;
+        }
+        // requisito físico (modo passo a passo)
+        let (falta, bloqueio) = match app.sim.as_ref() {
+            Some(sim) if sim.strict && !c.starts_with('@') => {
+                let toks: Vec<String> = c.split_whitespace().map(|x| x.to_string()).collect();
+                match pericia_core::equip::requirements(sim, &toks) {
+                    Some(n) => (n.tool.filter(|t| sim.equip.hand != Some(*t)), n.blocked),
+                    None => (None, None),
+                }
+            }
+            _ => (None, None),
+        };
+        let ok = *en && falta.is_none() && bloqueio.is_none();
+        let base = if c == "@tela" { T.accent2 } else if falta.is_some() { Color::new(0.20, 0.17, 0.12, 1.0) } else { T.panel2 };
+        if app.ui.hover(r) {
+            hint = Some(match (&falta, &bloqueio) {
+                (Some(t), _) => format!("Segure: {} — pegue na maleta.", pericia_core::equip::tool_name(*t)),
+                (_, Some(b)) => b.clone(),
+                _ => format!("comando: {}", c),
+            });
+        }
+        let label = l.clone();
+        if app.ui.button_c(r, &label, base, ok) {
+            if c == "@tela" {
+                app.phone.close();
+                app.phone.open = Some(item_id.to_string());
+            } else {
+                app.run(c);
+            }
+        }
+        if let Some(t) = falta {
+            let isz = bh - 6.0 * s;
+            maleta::draw_icon(app, maleta::icon_name(t), rect(r.x + r.w - isz - 3.0 * s, r.y + 3.0 * s, isz, isz));
+        }
+    }
+    if let Some(h) = hint {
+        let hr = rect(panel.x + pad, panel.y + panel.h - 36.0 * s, panel.w - pad * 2.0, 30.0 * s);
+        app.ui.frame(hr, T.term_bg, T.border);
+        let txt = phone::clip_text(&app.ui, &h, 11.0, F::Reg, hr.w - 12.0 * s);
+        app.ui.text(&txt, hr.x + 6.0 * s, hr.y + 19.0 * s, 11.0, F::Reg, T.warn);
+    }
+}
+
+/// Painel de um vestígio não digital: sinalizar, fotografar, comunicar (sem coletar).
+fn vestigio_panel(app: &mut App, panel: Rect, vid: &str) {
+    let s = app.ui.scale;
+    let pad = 10.0 * s;
+    let Some(sim) = app.sim.as_ref() else { return };
+    let Some(v) = sim.case.vestigios.iter().find(|v| v.id == vid).cloned() else { return };
+    let mut y = panel.y + pad;
+    let title = phone::clip_text(&app.ui, &format!("{} — {}", v.id, v.label), 14.0, F::Bold, panel.w - pad * 2.0 - 32.0 * s);
+    app.ui.text(&title, panel.x + pad, y + 16.0 * s, 14.0, F::Bold, T.text);
+    y += 28.0 * s;
+    for l in app.ui.wrap(&v.desc, 12.0, F::Reg, panel.w - pad * 2.0) {
+        app.ui.text(&l, panel.x + pad, y + 10.0 * s, 12.0, F::Reg, T.dim);
+        y += 16.0 * s;
+    }
+    let eq = &sim.equip;
+    let st = [
+        (eq.markers.get(&v.id).map(|n| format!("placa nº {}", n)), "sem placa"),
+        (eq.photographed.contains(&v.id).then(|| "fotografado".to_string()), "não fotografado"),
+        (eq.reported.contains(&v.id).then(|| "comunicado à equipe de local".to_string()), "não comunicado"),
+    ];
+    y += 6.0 * s;
+    for (ok, no) in st {
+        let (t, c) = match ok {
+            Some(x) => (format!("✔ {}", x), T.ok),
+            None => (format!("○ {}", no), T.dim),
+        };
+        app.ui.text(&t, panel.x + pad, y + 10.0 * s, 12.0, F::Reg, c);
+        y += 17.0 * s;
+    }
+    if v.biologico {
+        y += 4.0 * s;
+        for l in app.ui.wrap("Vestígio biológico: não toque sem luvas, não limpe, não colete. A coleta é da equipe especializada.", 11.5, F::Reg, panel.w - pad * 2.0) {
+            app.ui.text(&l, panel.x + pad, y + 10.0 * s, 11.5, F::Reg, T.warn);
+            y += 15.0 * s;
+        }
+    }
+    y += 10.0 * s;
+    app.ui.text("AÇÕES", panel.x + pad, y + 10.0 * s, 10.5, F::Bold, T.dim);
+    y += 16.0 * s;
+    let id = v.id.to_lowercase();
+    let acts = vec![
+        ("Sinalizar com placa e escala".to_string(), format!("marcar {}", id), !eq.markers.contains_key(&v.id)),
+        ("Fotografar".to_string(), format!("fotografar {}", id), true),
+        ("Comunicar à equipe de local".to_string(), format!("comunicar {}", id), !eq.reported.contains(&v.id)),
+    ];
+    draw_actions(app, panel, y, acts, vid);
 }
 
 fn station(app: &mut App, area: Rect) {
@@ -1170,6 +1508,13 @@ fn run_script(app: &mut App, sc: &mut Script) -> bool {
         }
         "tndel" => app.tablet.delete(arg.parse().unwrap_or(0)),
         "resume" => app.resume(),
+        "maleta" => {
+            if arg == "off" {
+                maleta::close(app)
+            } else {
+                maleta::open(app)
+            }
+        }
         "config" => match arg.as_str() {
             "off" => config::close(app),
             t => {
@@ -1212,6 +1557,7 @@ async fn main() {
     let fonts = Fonts::load();
     let settings = save::load_settings();
     let vols = settings.volumes();
+    let icons = maleta::load_icons();
     let mut app = App {
         ui: Ui::new(fonts),
         screen: Screen::Menu,
@@ -1246,6 +1592,8 @@ async fn main() {
         step_n: 0,
         key_n: 0,
         config: config::ConfigUi::default(),
+        maleta: maleta::MaletaUi::default(),
+        icons,
         caption: None,
         de: linuxde::LinuxDe::new(),
     };

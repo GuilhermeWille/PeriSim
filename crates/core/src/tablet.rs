@@ -238,7 +238,32 @@ pub fn objeto(s: &Sim, id: &str) -> Option<Vec<Secao>> {
         out.push(Secao { titulo: "Produtos do exame".into(), linhas: prods });
     }
 
-    let cuid = cuidados(it);
+    let vs: Vec<String> = s
+        .case
+        .vestigios
+        .iter()
+        .filter(|v| v.on_item.as_deref() == Some(it.id.as_str()))
+        .map(|v| {
+            let mut st = vec![];
+            if let Some(n) = s.equip.markers.get(&v.id) {
+                st.push(format!("placa nº {}", n));
+            }
+            if s.equip.photographed.contains(&v.id) {
+                st.push("fotografado".to_string());
+            }
+            if s.equip.reported.contains(&v.id) {
+                st.push("comunicado".to_string());
+            }
+            format!("{} — {}{}", v.id, v.desc, if st.is_empty() { String::new() } else { format!(" ({})", st.join(", ")) })
+        })
+        .collect();
+    if !vs.is_empty() {
+        out.push(Secao { titulo: "Vestígios não digitais".into(), linhas: vs });
+    }
+    let mut cuid = cuidados(it);
+    if s.strict && it.physical.biohazard {
+        cuid.insert(0, "Vestígio biológico: luvas obrigatórias; troque-as antes de tocar outro material. Não limpe nem colete.".into());
+    }
     if !cuid.is_empty() {
         out.push(Secao { titulo: "Cuidados de manuseio".into(), linhas: cuid });
     }
@@ -324,6 +349,7 @@ mod t {
         let cf = it.physical.camouflaged.clone().unwrap();
         let antes = format!("{:?}", objeto(&s, &it.id).unwrap());
         assert!(!antes.contains(&cf));
+        s.exec("pegar lanterna");
         s.exec(&format!("inspecionar {}", it.id.to_lowercase()));
         let depois = format!("{:?}", objeto(&s, &it.id).unwrap());
         assert!(depois.contains(&cf), "{}", depois);

@@ -1,6 +1,6 @@
 //! Tela do aparelho celular: o que é exibido em cada estado e as regras da navegação manual.
 
-use pericia_core::casegen::generate;
+use pericia_core::casegen::generate_classic as generate;
 use pericia_core::engine::Sim;
 use pericia_core::model::*;
 use pericia_core::phone::{view, Screen};

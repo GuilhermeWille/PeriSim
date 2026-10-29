@@ -44,8 +44,25 @@ Documento final:
   laudo auto                  pré-preenche campos a partir das ações e anotações
   finalizar                   fecha o caso e abre a avaliação"
             .into(),
+        "equipamento" | "maleta" | "passo" => "\
+Equipamento e etapas físicas (casos do gerador 1.2.0 — modo passo a passo):
+  pegar <ferramenta>            segura uma ferramenta da maleta (a anterior volta para ela)
+  guardar                       devolve à maleta o que está na mão
+  luvas calcar|trocar|retirar   luvas de nitrilo (troque depois de tocar vestígio biológico)
+  pulseira colocar|retirar      pulseira antiestática (componentes eletrônicos)
+  desparafusar <item> [slot]    um parafuso por vez: tampa, ou suporte da mídia no slot
+  cabo desconectar <item> <slot> dados|energia
+  conectar <mídia> bloqueador|estacao   (com o conector certo na mão)
+  conectar bloqueador estacao   (cabo USB do bloqueador)
+  marcar <V-xx>                 placa numerada com escala junto ao vestígio
+  comunicar <V-xx>              registra o vestígio para a equipe de local (sem coletar)
+  equipamento                   o que está na mão e o que você veste
+Ferramentas: camera, oficio, tesoura, chave, lanterna, placas, cabo-sata, adaptador-m2,
+  leitor-sd, cabo-usb, cabo-usbc, cabo-lightning, bateria, faraday, aluminio, ejetor,
+  pendrive-coleta, saco, fita-lacre, etiquetas"
+            .into(),
         _ => "\
-COMANDOS (digite 'ajuda <tema>' para detalhes: fs, rede, laudo)
+COMANDOS (digite 'ajuda <tema>' para detalhes: fs, rede, laudo, equipamento)
 
 Situação:        caso · itens · item <id> · tempo · notas · custodia · auditoria · progresso
 Físico:          fotografar · lacre conferir|aplicar · deslacrar · abrir · componente remover
@@ -56,6 +73,7 @@ Móveis:          isolar <item> faraday|aluminio · airplane · sim remover · a
                  desbloquear <item> <senha> · extrair <item> fisica|fs|logica · senha
                  tela <item> inicio|mensagens|telefone|contatos|galeria|arquivos|relogio|config|imei|foto
 Coleta:          embalar · etiquetar
+Equipamento:     pegar <ferramenta> · guardar · luvas · pulseira · desparafusar · cabo · conectar · marcar · comunicar
 Inicialização:   bios <item> · bios ordem <item> forense|disco
 Nuvem:           nuvem [status] · nuvem solicitar <conta> · nuvem acessar <conta> <senha> · nuvem ls · nuvem cat <arquivo>
 Investigação:    fs ... · recuperar · expandir · decifrar · ocr · dicionario

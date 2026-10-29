@@ -719,6 +719,103 @@ def _(r):
     return room(x, r, 0.18, 0.08)
 
 
+# --- equipamento (v0.8)
+
+@som("pegar_ferramenta")
+def _(r):
+    x = silence(0.6)
+    place(x, grains(0.18, r, 160, 900, 6000, amp=(0.1, 0.4)), 0.0, 0.5)  # remexe na espuma
+    place(x, modal([700, 1500, 2600], [0.04, 0.02, 0.012], [1.0, 0.5, 0.25], 0.2, r, 0.05), 0.16, 0.8)
+    place(x, band(r.standard_normal(int(0.08 * SR)), 300, 2000, 2) * env_ar(int(0.08 * SR), 0.01, 0.05), 0.2, 0.3)
+    return room(x, r, 0.18, 0.08)
+
+
+@som("guardar_ferramenta")
+def _(r):
+    x = silence(0.5)
+    place(x, modal([600, 1300], [0.03, 0.015], [1.0, 0.4], 0.15, r, 0.05), 0.0, 0.7)
+    place(x, band(r.standard_normal(int(0.12 * SR)), 200, 1500, 2) * env_ar(int(0.12 * SR), 0.01, 0.08), 0.03, 0.45)  # na espuma
+    return room(x, r, 0.18, 0.08)
+
+
+@som("luvas")
+def _(r):
+    x = silence(0.9)
+    # látex/nitrilo esticando (atrito agudo) e o estalo no punho
+    n = int(0.35 * SR)
+    st = band(r.standard_normal(n), 1500, 7000, 2) * env_ar(n, 0.05, 0.1) * (0.5 + 0.5 * np.sin(np.linspace(0, 18, n)) ** 2)
+    place(x, st, 0.0, 0.5)
+    place(x, click(r, 0.012, 600, 5000, 0.004) + modal([420, 900], [0.02, 0.01], [0.6, 0.3], 0.05, r), 0.38, 1.0)
+    place(x, st[: n // 2] * 0.6, 0.48, 0.5)
+    place(x, click(r, 0.012, 600, 5000, 0.004) + modal([460, 950], [0.02, 0.01], [0.6, 0.3], 0.05, r), 0.68, 0.9)
+    return room(x, r, 0.18, 0.08)
+
+
+@som("pulseira")
+def _(r):
+    x = silence(0.7)
+    n = int(0.25 * SR)
+    cr = r.standard_normal(n) * (r.random(n) < 0.2)
+    place(x, band(cr, 1500, 9000, 2) * env_ar(n, 0.02, 0.08), 0.0, 0.6)  # velcro
+    place(x, modal([2600, 4100], [0.012, 0.006], [1.0, 0.4], 0.04, r) + click(r, 0.006, 2000, 8000, 0.001), 0.38, 0.8)  # jacaré
+    return room(x, r, 0.16, 0.06)
+
+
+@som("parafuso")
+def _(r):
+    x = silence(0.75)
+    place(x, parafuso(r, 0.45), 0.0, 0.8)
+    place(x, modal([3400, 5600], [0.03, 0.015], [0.8, 0.4], 0.08, r, 0.05), 0.52, 0.6)  # parafuso na bandeja
+    return room(x, r, 0.18, 0.08)
+
+
+@som("cabo_desconectar")
+def _(r):
+    x = silence(0.5)
+    n = int(0.08 * SR)
+    place(x, band(r.standard_normal(n), 1200, 5000, 2) * env_ar(n, 0.01, 0.04), 0.0, 0.4)
+    place(x, click(r, 0.01, 1000, 6000, 0.0015) + modal([1700], [0.012], [0.5], 0.03, r), 0.07, 0.9)
+    place(x, modal([500, 1100], [0.02, 0.01], [0.4, 0.2], 0.06, r), 0.16, 0.4)  # cabo cai solto
+    return room(x, r, 0.18, 0.08)
+
+
+@som("conectar")
+def _(r):
+    x = silence(0.45)
+    n = int(0.06 * SR)
+    place(x, band(r.standard_normal(n), 1500, 7000, 2) * env_ar(n, 0.01, 0.03), 0.0, 0.35)
+    place(x, click(r, 0.01, 1500, 8000, 0.0012) + modal([2200, 3900], [0.01, 0.006], [0.6, 0.25], 0.03, r), 0.06, 1.0)
+    return room(x, r, 0.16, 0.06)
+
+
+@som("placa")
+def _(r):
+    x = silence(0.5)
+    place(x, modal([900, 1900, 3100], [0.03, 0.02, 0.01], [1.0, 0.5, 0.2], 0.12, r, 0.05), 0.0, 0.9)  # plástico no chão
+    place(x, modal([1000, 2100], [0.02, 0.01], [0.6, 0.3], 0.08, r, 0.05), 0.07, 0.5)  # abre o cavalete
+    return room(x, r, 0.22, 0.12)
+
+
+@som("maleta_abrir")
+def _(r):
+    x = silence(1.0)
+    for k, t in enumerate([0.0, 0.18]):  # dois fechos
+        place(x, modal([1800, 3200], [0.015, 0.008], [1.0, 0.4], 0.05, r) + click(r, 0.01, 1500, 8000, 0.0015), t, 0.9)
+    n = int(0.35 * SR)
+    place(x, band(r.standard_normal(n), 300, 2500, 2) * env_ar(n, 0.05, 0.15), 0.35, 0.35)  # tampa sobe
+    place(x, modal([160, 320], [0.08, 0.04], [0.8, 0.3], 0.3, r), 0.7, 0.5)  # tampa encosta
+    return room(x, r, 0.2, 0.1)
+
+
+@som("maleta_fechar")
+def _(r):
+    x = silence(0.9)
+    place(x, modal([140, 300, 620], [0.1, 0.05, 0.02], [1.0, 0.4, 0.2], 0.35, r), 0.0, 0.9)
+    for t in (0.35, 0.5):
+        place(x, modal([1800, 3200], [0.015, 0.008], [1.0, 0.4], 0.05, r) + click(r, 0.01, 1500, 8000, 0.0015), t, 0.8)
+    return room(x, r, 0.2, 0.1)
+
+
 # --- ambientes (estéreo, em loop sem emenda)
 
 def loop_stereo(gen, dur, r, xfade=2.0):

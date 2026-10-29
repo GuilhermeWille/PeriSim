@@ -37,6 +37,15 @@ pub fn command_sound(cmd: &str) -> Option<&'static str> {
         ("inspecionar", _) => "inspecionar",
         ("senha", _) | ("solicitar-senhas", _) | ("anotar", _) => "caneta",
         ("bios", _) => "digitacao",
+        ("pegar", _) => "pegar_ferramenta",
+        ("guardar", _) | ("soltar", _) => "guardar_ferramenta",
+        ("luvas", _) => "luvas",
+        ("pulseira", _) => "pulseira",
+        ("desparafusar", _) => "parafuso",
+        ("cabo", _) => "cabo_desconectar",
+        ("conectar", _) => "conectar",
+        ("marcar", _) => "placa",
+        ("comunicar", _) => "caneta",
         _ => return None,
     })
 }
@@ -114,6 +123,7 @@ pub fn update(app: &mut App) {
         _ => None,
     };
     app.audio.ambient(amb);
+    app.audio.music(if app.settings.music_on { Some("musica_noir") } else { None });
     let station = app.screen == Screen::Game && app.area == Area::Station;
     app.audio.layer(if station { Some("ambiente_estacao") } else { None });
     // cliques de botões e abas da interface
@@ -165,7 +175,11 @@ mod t {
             let n = command_sound(c).unwrap();
             assert!(dir.join(format!("{}.wav", n)).is_file(), "falta {}.wav ({})", n, c);
         }
-        let mut extra = vec!["ui_clique", "ui_erro", "tablet_sacar", "tablet_guardar", "tablet_toque", "nota_gravada", "cadeira", "ambiente_laboratorio", "ambiente_escritorio", "ambiente_estacao"];
+        for c in ["pegar camera", "guardar", "luvas calcar", "pulseira colocar", "desparafusar item-01", "cabo desconectar x y dados", "conectar m-01 bloqueador", "marcar v-01", "comunicar v-01"] {
+            let n = command_sound(c).unwrap();
+            assert!(dir.join(format!("{}.wav", n)).is_file(), "falta {}.wav ({})", n, c);
+        }
+        let mut extra = vec!["ui_clique", "ui_erro", "tablet_sacar", "tablet_guardar", "tablet_toque", "nota_gravada", "cadeira", "ambiente_laboratorio", "ambiente_escritorio", "ambiente_estacao", "musica_noir", "maleta_abrir", "maleta_fechar"];
         extra.extend(["interagir_gabinete", "interagir_notebook", "interagir_celular", "interagir_midia", "interagir_ferramenta"]);
         for n in extra {
             assert!(dir.join(format!("{}.wav", n)).is_file(), "falta {}.wav", n);

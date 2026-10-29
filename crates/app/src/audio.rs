@@ -25,12 +25,16 @@ pub enum Cat {
     Ambiente = 0,
     Efeitos = 1,
     Interface = 2,
+    Musica = 3,
 }
 
 pub struct Clip {
     /// Amostras intercaladas (1 ou 2 canais), em 44,1 kHz.
     pub data: Vec<f32>,
     pub ch: usize,
+    /// Taxa de amostragem do arquivo; a voz é reamostrada na mixagem (música em 22,05 kHz
+    /// ocupa metade da memória).
+    pub rate: u32,
 }
 
 impl Clip {
@@ -56,13 +60,13 @@ struct Voice {
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct Volumes {
     pub master: f32,
-    pub cat: [f32; 3],
+    pub cat: [f32; 4],
     pub muted: bool,
 }
 
 impl Default for Volumes {
     fn default() -> Self {
-        Volumes { master: 0.8, cat: [0.55, 0.9, 0.6], muted: false }
+        Volumes { master: 0.8, cat: [0.55, 0.9, 0.6, 0.45], muted: false }
     }
 }
 
@@ -70,18 +74,18 @@ pub struct Mix {
     voices: Vec<Voice>,
     vol: Volumes,
     /// volume efetivo suavizado por categoria (evita estalos ao mexer no controle)
-    cur: [f32; 3],
+    cur: [f32; 4],
 }
 
 impl Mix {
     pub fn new() -> Mix {
-        Mix { voices: vec![], vol: Volumes::default(), cur: [0.0; 3] }
+        Mix { voices: vec![], vol: Volumes::default(), cur: [0.0; 4] }
     }
 
     /// Mistura `frames` quadros estéreo em `out` (intercalado, i16).
     pub fn render(&mut self, out: &mut [i16], frames: usize) {
         let mut acc = vec![0.0f32; frames * 2];
-        let target: [f32; 3] = std::array::from_fn(|i| if self.vol.muted { 0.0 } else { self.vol.master * self.vol.cat[i] });
+        let target: [f32; 4] = std::array::from_fn(|i| if self.vol.muted { 0.0 } else { self.vol.master * self.vol.cat[i] });
         let start = self.cur;
         for v in self.voices.iter_mut() {
             let n = v.clip.frames();
@@ -141,6 +145,7 @@ pub struct Audio {
     next: u64,
     ambient: Option<(String, u64)>,
     layer: Option<(String, u64)>,
+    music: Option<(String, u64)>,
     seed: u32,
     rec: Option<(Arc<AtomicBool>, std::thread::JoinHandle<()>)>,
     /// Mixagem presa aos quadros (vídeos de demonstração): (arquivo, amostras, fração pendente).
@@ -178,7 +183,8 @@ pub fn parse_wav(b: &[u8]) -> Result<Clip, String> {
     }
     let d = data.ok_or("sem bloco de dados")?;
     let mut v: Vec<f32> = d.chunks_exact(2).map(|x| i16::from_le_bytes([x[0], x[1]]) as f32 / 32768.0).collect();
-    if rate != RATE {
+    // taxas exóticas são convertidas; 44,1 kHz e seus divisores ficam como estão
+    if RATE % rate != 0 {
         let n = v.len() / ch;
         let m = (n as f64 * RATE as f64 / rate as f64) as usize;
         let mut w = Vec::with_capacity(m * ch);
@@ -192,8 +198,9 @@ pub fn parse_wav(b: &[u8]) -> Result<Clip, String> {
             }
         }
         v = w;
+        return Ok(Clip { data: v, ch, rate: RATE });
     }
-    Ok(Clip { data: v, ch })
+    Ok(Clip { data: v, ch, rate })
 }
 
 pub fn wav_bytes(samples: &[i16], ch: u16) -> Vec<u8> {
@@ -224,7 +231,7 @@ impl Audio {
         mix.lock().unwrap().vol = vol;
         let status = Arc::new(Mutex::new(String::from("iniciando…")));
         let ok = Arc::new(AtomicBool::new(false));
-        let mut a = Audio { mix, clips: HashMap::new(), status, ok, next: 1, ambient: None, layer: None, seed: 0x9e37_79b9, rec: None, offline: None, last: HashMap::new(), log: vec![] };
+        let mut a = Audio { mix, clips: HashMap::new(), status, ok, next: 1, ambient: None, layer: None, music: None, seed: 0x9e37_79b9, rec: None, offline: None, last: HashMap::new(), log: vec![] };
         let loaded = a.load_clips();
         if std::env::var("PERICIA_AUDIO").map(|v| v == "off").unwrap_or(false) {
             a.set_status("desativado (PERICIA_AUDIO=off)");
@@ -307,6 +314,7 @@ impl Audio {
             }
         }
         let step = if fade_in > 0.0 { 1.0 / (fade_in * RATE as f32) } else { 1.0 };
+        let rate = rate * clip.rate as f64 / RATE as f64;
         m.voices.push(Voice { clip, pos: 0.0, rate, gl, gr, cat, looping, id, fade: if fade_in > 0.0 { 0.0 } else { 1.0 }, fade_to: 1.0, fade_step: step });
         Some(id)
     }
@@ -348,6 +356,21 @@ impl Audio {
         if let Some(n) = name {
             if let Some(id) = self.push(n, Cat::Ambiente, 1.0, 1.0, 1.0, true, 1.5) {
                 self.ambient = Some((n.to_string(), id));
+            }
+        }
+    }
+
+    /// Música em laço (None = sem música), com fusão longa.
+    pub fn music(&mut self, name: Option<&str>) {
+        if self.music.as_ref().map(|a| a.0.as_str()) == name {
+            return;
+        }
+        if let Some((_, id)) = self.music.take() {
+            self.fade_out(id, 2.0);
+        }
+        if let Some(n) = name {
+            if let Some(id) = self.push(n, Cat::Musica, 1.0, 1.0, 1.0, true, 2.5) {
+                self.music = Some((n.to_string(), id));
             }
         }
     }
@@ -554,7 +577,7 @@ mod t {
     use super::*;
 
     fn clip(v: Vec<f32>, ch: usize) -> Arc<Clip> {
-        Arc::new(Clip { data: v, ch })
+        Arc::new(Clip { data: v, ch, rate: RATE })
     }
 
     #[test]
@@ -570,8 +593,8 @@ mod t {
     #[test]
     fn mixer_categorias_mudo_e_fim_da_voz() {
         let mut m = Mix::new();
-        m.vol = Volumes { master: 1.0, cat: [0.0, 1.0, 1.0], muted: false };
-        m.cur = [0.0, 1.0, 1.0];
+        m.vol = Volumes { master: 1.0, cat: [0.0, 1.0, 1.0, 1.0], muted: false };
+        m.cur = [0.0, 1.0, 1.0, 1.0];
         let c = clip(vec![0.5; 64], 1);
         m.voices.push(Voice { clip: c.clone(), pos: 0.0, rate: 1.0, gl: 1.0, gr: 1.0, cat: Cat::Efeitos, looping: false, id: 1, fade: 1.0, fade_to: 1.0, fade_step: 1.0 });
         m.voices.push(Voice { clip: c.clone(), pos: 0.0, rate: 1.0, gl: 1.0, gr: 1.0, cat: Cat::Ambiente, looping: true, id: 2, fade: 1.0, fade_to: 1.0, fade_step: 1.0 });
@@ -582,7 +605,7 @@ mod t {
         assert_eq!(out[200], 0);
         assert_eq!(m.voices.len(), 1, "voz de efeito terminada é removida; o loop continua");
         m.vol.muted = true;
-        m.cur = [0.0; 3];
+        m.cur = [0.0; 4];
         m.voices[0].cat = Cat::Efeitos;
         let mut out2 = vec![1i16; 256];
         m.render(&mut out2, 128);

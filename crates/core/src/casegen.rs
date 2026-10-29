@@ -11,9 +11,9 @@ use crate::rng::Rng;
 use crate::util::{fmt_dt, ts, BRT};
 use std::collections::BTreeMap;
 
-pub const GEN_VERSION: &str = "1.1.0";
+pub const GEN_VERSION: &str = "1.2.0";
 /// Versões do gerador que esta compilação reproduz com fidelidade (salvamentos antigos).
-pub const SUPPORTED_GEN_VERSIONS: &[&str] = &["1.0.0", "1.1.0"];
+pub const SUPPORTED_GEN_VERSIONS: &[&str] = &["1.0.0", "1.1.0", "1.2.0"];
 /// Rótulo da semente do conteúdo-base. Fica fixo entre versões para que um mesmo ID de
 /// caso mantenha o mesmo conteúdo-base; versões novas só ACRESCENTAM extensões, com
 /// sementes próprias (ver `extensions`).
@@ -305,6 +305,12 @@ pub fn generate(module: ModuleId, difficulty: u8, seed: u32) -> CaseFile {
     generate_v(module, difficulty, seed, GEN_VERSION)
 }
 
+/// Caso com as regras clássicas (gerador 1.1.0: ações sem exigência de ferramenta na mão).
+/// Usado pelos testes de fluxo e de compatibilidade de salvamentos antigos.
+pub fn generate_classic(module: ModuleId, difficulty: u8, seed: u32) -> CaseFile {
+    generate_v(module, difficulty, seed, "1.1.0")
+}
+
 /// Gera o caso como a versão `version` do gerador o faria (deve estar em
 /// `SUPPORTED_GEN_VERSIONS`; versões desconhecidas caem na atual).
 pub fn generate_v(module: ModuleId, difficulty: u8, seed: u32, version: &str) -> CaseFile {
@@ -367,6 +373,7 @@ fn generate_base(module: ModuleId, difficulty: u8, seed: u32) -> CaseFile {
         required_docs: vec![module.document()],
         provided_passwords: vec![],
         operator_default_pins: OPERATORS.iter().map(|(a, b)| (a.to_string(), b.to_string())).collect(),
+        vestigios: vec![],
     };
     match module {
         ModuleId::M501 => crate::casegen_disk::gen_501(&mut c, &mut case),

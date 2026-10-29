@@ -56,7 +56,7 @@ pub fn draw(app: &mut App) {
     let (sw, sh) = (screen_width(), screen_height());
     draw_rectangle(0.0, 0.0, sw, sh, Color::new(0.0, 0.0, 0.0, 0.6));
     let w = (760.0 * s).min(sw - 24.0 * s);
-    let h = (540.0 * s).min(sh - 24.0 * s);
+    let h = (630.0 * s).min(sh - 24.0 * s);
     let p = rect((sw - w) / 2.0, (sh - h) / 2.0, w, h);
     app.ui.frame(p, T.panel, T.accent2);
     app.ui.text("Configurações", p.x + 18.0 * s, p.y + 30.0 * s, 18.0, F::Bold, T.text);
@@ -84,7 +84,11 @@ pub fn draw(app: &mut App) {
             }
             y += row;
             slider_row(app, "vu", cx, y, cw, "Interface e tablet", &mut st.vol_ui, 0.0, 1.0, pct);
+            y += row;
+            slider_row(app, "vmu", cx, y, cw, "Música (jazz noir)", &mut st.vol_music, 0.0, 1.0, pct);
             y += row + 6.0 * s;
+            app.ui.toggle(rect(cx, y, cw, 32.0 * s), "Música ambiente", &mut st.music_on);
+            y += 38.0 * s;
             app.ui.toggle(rect(cx, y, cw, 32.0 * s), "Silenciar tudo", &mut st.muted);
             y += 38.0 * s;
             app.ui.toggle(rect(cx, y, cw, 32.0 * s), "Som dos passos", &mut st.footsteps);
@@ -129,8 +133,9 @@ pub fn draw(app: &mut App) {
             for (k, d) in [
                 ("W A S D / setas", "andar (Shift corre)"),
                 ("Botão direito ou Tab", "olhar / capturar o mouse"),
-                ("Clique ou E", "interagir com o objeto na mira"),
+                ("Clique ou E", "interagir com o objeto na mira / abrir a maleta"),
                 ("T", "tirar ou guardar o tablet"),
+                ("G", "devolver à maleta a ferramenta da mão"),
                 ("Esc", "fechar janelas; no ambiente, abrir estas configurações"),
                 ("Page Up / Page Down", "olhar para cima / para baixo pelo teclado"),
             ] {
@@ -151,7 +156,7 @@ pub fn draw(app: &mut App) {
             y += row + 6.0 * s;
             app.ui.toggle(rect(cx, y, cw, 32.0 * s), "Dicas de teclas no canto da tela", &mut st.show_hints);
             y += 38.0 * s;
-            app.ui.toggle(rect(cx, y, cw, 32.0 * s), "Mostrar o tablet nas mãos", &mut st.held_tablet);
+            app.ui.toggle(rect(cx, y, cw, 32.0 * s), "Mostrar as mãos do perito", &mut st.held_tablet);
         }
     }
     // rodapé

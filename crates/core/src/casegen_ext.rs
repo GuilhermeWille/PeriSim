@@ -10,6 +10,11 @@
 //! * 5.01/5.03 D2+: mais casos-limite de arquivos — apagado sobrescrito, arquivo em
 //!   setores ilegíveis, assinatura que não corresponde à extensão;
 //! * 5.04 D3+: mensagem reencaminhada por intermediário, com DKIM quebrado e cadeia ARC.
+//!
+//! Extensões da 1.2.0 (modo passo a passo):
+//! * vestígios físicos na cena e no material (sangue seco, cabelo, bituca, copo, pegada),
+//!   que o perito sinaliza, fotografa e comunica sem coletar; itens com vestígio
+//!   biológico contaminam as luvas.
 
 use crate::model::*;
 use crate::rng::Rng;
@@ -24,6 +29,14 @@ pub fn apply(case: &mut CaseFile, version: &str) {
     if !version_at_least(version, "1.1.0") {
         return;
     }
+    apply_11(case);
+    if version_at_least(version, "1.2.0") {
+        vestigios(case);
+    }
+    recompute_hashes(case);
+}
+
+fn apply_11(case: &mut CaseFile) {
     let mut rng = Rng::for_label(case.seed, &format!("ext-1.1|{}|{}", case.module.code(), case.difficulty));
     let d = case.difficulty;
     match case.module {
@@ -43,6 +56,9 @@ pub fn apply(case: &mut CaseFile, version: &str) {
         ModuleId::M504 if d >= 3 => arc_forward(case, &mut rng),
         _ => {}
     }
+}
+
+fn recompute_hashes(case: &mut CaseFile) {
     // hashes registrados em documento anterior descrevem a mídia como ela é (com as extensões)
     let ids: Vec<String> = case.documented_hashes.keys().cloned().collect();
     for id in ids {
@@ -150,4 +166,73 @@ fn arc_forward(case: &mut CaseFile, rng: &mut Rng) {
     );
     f.content.replace_range(pos..line_end, &arc);
     f.content = f.content.replacen("Subject: ", &format!("List-Id: <{}>\nSubject: [aviso] ", list), 1);
+}
+
+
+/// Vestígios não digitais (gerador 1.2.0). Conteúdo fictício e sem exageros: o objetivo
+/// é treinar preservação (luvas, sinalização, fotografia, comunicação), não chocar.
+fn vestigios(case: &mut CaseFile) {
+    let mut rng = Rng::for_label(case.seed, &format!("ext-1.2|vest|{}|{}", case.module.code(), case.difficulty));
+    let d = case.difficulty;
+    let mut out: Vec<Vestigio> = vec![];
+    let mut add = |kind: &str, label: &str, desc: &str, on: Option<String>, bio: bool, spot: &str| {
+        out.push(Vestigio { id: String::new(), kind: kind.into(), label: label.into(), desc: desc.into(), on_item: on, biologico: bio, spot: spot.into() });
+    };
+    let first = case.items.iter().find(|i| !i.hidden).map(|i| (i.id.clone(), i.kind));
+    match case.setting {
+        Setting::Local => {
+            add("sangue", "Gotas avermelhadas no piso", "Gotas secas de coloração avermelhada (aspecto de sangue) no piso, junto à cadeira.", None, true, "piso_mesa");
+            if rng.chance(0.8) {
+                add("cabelo", "Fio de cabelo no teclado", "Fio de cabelo escuro, de cerca de 20 cm, sobre o teclado da mesa.", None, true, "teclado");
+            }
+            if rng.chance(0.7) {
+                add("bituca", "Bituca de cigarro no cinzeiro", "Bituca recente no cinzeiro da mesa (possível material biológico — saliva).", None, true, "cinzeiro");
+            }
+            if d >= 2 && rng.chance(0.6) {
+                add("pegada", "Pegada parcial sobre as gotas", "Marca parcial de solado sobre uma das gotas do piso.", None, false, "piso_mesa");
+            }
+            if d >= 3 && rng.chance(0.5) {
+                add("copo", "Copo descartável com café", "Copo com resto de café e marca de lábios na borda.", None, true, "mesa");
+            }
+        }
+        Setting::Laboratorio => {
+            if let Some((id, kind)) = first {
+                let p = match d {
+                    1 => 0.4,
+                    2 => 0.65,
+                    _ => 0.8,
+                };
+                if rng.chance(p) {
+                    let onde = if kind == ItemKind::Celular || kind == ItemKind::Tablet { "na capa do aparelho" } else { "na lateral do equipamento" };
+                    add("sangue", "Mancha avermelhada seca", &format!("Mancha seca de coloração avermelhada (aspecto de sangue) {}.", onde), Some(id.clone()), true, "item");
+                }
+                if rng.chance(p * 0.6) {
+                    let onde = if kind.is_computer() { "preso na grade de ventilação" } else { "preso à embalagem" };
+                    add("cabelo", "Fio de cabelo", &format!("Fio de cabelo {}.", onde), Some(id), true, "item");
+                }
+            }
+        }
+    }
+    for (k, v) in out.iter_mut().enumerate() {
+        v.id = format!("V-{:02}", k + 1);
+    }
+    for v in &out {
+        if let Some(id) = &v.on_item {
+            if let Some(it) = case.items.iter_mut().find(|i| &i.id == id) {
+                if v.biologico {
+                    it.physical.biohazard = true;
+                }
+                it.physical.traces.push(format!("{} ({})", v.label.to_lowercase(), v.id));
+            }
+        }
+    }
+    if !out.is_empty() {
+        let msg = if d <= 2 {
+            "Há vestígios físicos (ex.: manchas, cabelo): use luvas, sinalize com placa numerada, fotografe e comunique à equipe de local — não colete nem limpe."
+        } else {
+            "Preserve vestígios não digitais que encontrar."
+        };
+        case.briefing.push(msg.to_string());
+    }
+    case.vestigios = out;
 }

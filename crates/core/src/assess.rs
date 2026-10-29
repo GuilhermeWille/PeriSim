@@ -94,6 +94,21 @@ pub fn checklist(s: &Sim) -> Vec<(bool, String)> {
             v.push((any_item(s, "etiqueta"), "Identificar/etiquetar".into()));
         }
     }
+    if s.strict {
+        let has = |k: &str| s.faults.iter().any(|f| f.contains(k));
+        v.insert(0, (s.equip.gloves_pairs > 0 && !has("sem luvas"), "Calçar luvas antes de manusear o material".into()));
+        if a.has("desparafusar") || a.has("abrir") || a.has("midia-remover") || a.has("componente-remover") {
+            v.push((!has("pulseira antiestática"), "Usar pulseira antiestática ao manipular componentes".into()));
+        }
+        if !s.case.vestigios.is_empty() {
+            let all = |set: &dyn Fn(&str) -> bool| s.case.vestigios.iter().all(|x| set(&x.id));
+            let ok = all(&|id| s.equip.markers.contains_key(id)) && all(&|id| s.equip.photographed.contains(id)) && all(&|id| s.equip.reported.contains(id));
+            v.push((ok, "Vestígios não digitais: sinalizar com placa, fotografar e comunicar (sem coletar)".into()));
+        }
+        if s.case.items.iter().any(|i| i.physical.biohazard) {
+            v.push((!has("contaminação cruzada"), "Trocar as luvas depois de tocar material com vestígio biológico".into()));
+        }
+    }
     v.push((!s.report.conclusao.trim().is_empty() || s.case.module == ModuleId::M505, "Redigir o documento final".into()));
     v
 }
@@ -289,7 +304,11 @@ pub fn hint(s: &Sim) -> String {
 
 fn why(step: &str) -> &'static str {
     let s = step.to_lowercase();
-    if s.contains("fotograf") { "a fixação documenta o estado original antes de qualquer intervenção." }
+    if s.contains("luvas") && s.contains("trocar") { "luvas usadas em material com sangue ou cabelo transferem o vestígio para o próximo objeto tocado." }
+    else if s.contains("luvas") { "as mãos nuas deixam impressões e DNA e podem destruir vestígios latentes." }
+    else if s.contains("pulseira") { "a descarga eletrostática pode danificar a mídia e o equipamento examinados." }
+    else if s.contains("vestígios não digitais") { "a posição e o estado do vestígio são documentados antes da coleta pela equipe especializada." }
+    else if s.contains("fotograf") { "a fixação documenta o estado original antes de qualquer intervenção." }
     else if s.contains("lacre") && s.contains("confer") { "divergências entre lacre e documentação precisam ser registradas antes do deslacre." }
     else if s.contains("bloqueador") { "impede que a leitura altere a mídia original." }
     else if s.contains("imagem") || s.contains("cópia") || s.contains("aquisi") { "o exame é feito sobre a cópia, preservando o original." }

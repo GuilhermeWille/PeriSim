@@ -106,6 +106,9 @@ pub struct Sim {
     pub cloud_access: Option<String>,
     pub cloud_fails: u32,
     pub cloud_locked: bool,
+    /// Regras passo a passo (gerador 1.2.0+): ferramenta na mão, luvas, etapas físicas.
+    pub strict: bool,
+    pub equip: crate::equip::Equip,
 }
 
 /// Comandos do motor (para sugestões quando há erro de digitação).
@@ -114,7 +117,8 @@ pub const KNOWN_COMMANDS: &[&str] = &[
     "midia", "bloqueio", "imagem", "sanitizar", "clone", "hash", "verificar-hash", "energia", "memoria", "volume", "rede", "inspecionar", "isolar",
     "airplane", "imei", "sim", "alarmes", "carregar", "desbloquear", "extrair", "senha", "embalar", "camera", "solicitar-senhas", "tela", "etiquetar",
     "fs", "recuperar", "expandir", "decifrar", "ocr", "dicionario", "dns", "whois", "traceroute", "navegar", "preservar", "arquivo-web", "email",
-    "conexao", "anotar", "achei", "laudo", "finalizar", "nuvem", "bios",
+    "conexao", "anotar", "achei", "laudo", "finalizar", "nuvem", "bios", "pegar", "guardar", "luvas", "pulseira", "desparafusar", "cabo", "conectar",
+    "marcar", "comunicar", "equipamento",
 ];
 
 impl Sim {
@@ -142,7 +146,10 @@ impl Sim {
             cloud_access: None,
             cloud_fails: 0,
             cloud_locked: false,
+            strict: false,
+            equip: Default::default(),
         };
+        s.strict = crate::equip::is_strict(&s.case);
         s.audit.record(start, &s.actor, "abertura", &format!("Caso {} — {}", s.case.id, s.case.title), "sessão iniciada");
         s
     }
@@ -242,6 +249,14 @@ impl Sim {
         let toks: Vec<String> = line.split_whitespace().map(|s| s.to_string()).collect();
         let cmd = toks[0].to_lowercase();
         let a = |i: usize| toks.get(i).cloned().unwrap_or_default();
+        let need = match self.check_equip(&toks) {
+            Ok(n) => n,
+            Err(e) => return e,
+        };
+        // fotografia de vestígio (V-xx) — não é um item do material
+        if cmd == "fotografar" && self.case.vestigios.iter().any(|v| v.id.eq_ignore_ascii_case(&a(1))) {
+            return self.cmd_fotografar_vestigio(&a(1));
+        }
         let out = match cmd.as_str() {
             "ajuda" | "help" | "?" => Output::ok(tools::help(&a(1))),
             "caso" => Output::ok(tools::describe_case(self)),
@@ -309,8 +324,35 @@ impl Sim {
             "achei" | "palavra-chave" => self.cmd_achei(&toks),
             "laudo" => tools::laudo(self, &toks),
             "finalizar" | "avaliar" => crate::assess::finalize(self),
+            // --- equipamento e etapas físicas (modo passo a passo)
+            "pegar" => self.cmd_pegar(&a(1)),
+            "guardar" | "soltar" => self.cmd_guardar(),
+            "luvas" => self.cmd_luvas(&a(1).to_lowercase()),
+            "pulseira" => self.cmd_pulseira(&a(1).to_lowercase()),
+            "desparafusar" => self.cmd_desparafusar(&a(1), &a(2)),
+            "cabo" => self.cmd_cabo(&a(1), &a(2), &a(3), &a(4).to_lowercase()),
+            "conectar" => self.cmd_conectar(&a(1), &a(2).to_lowercase()),
+            "marcar" => self.cmd_marcar(&a(1)),
+            "comunicar" => self.cmd_comunicar(&a(1)),
+            "equipamento" | "maos" | "mãos" => Output::ok(self.equip_status()),
             _ => Output::err(format!("Comando desconhecido: '{}'. Digite 'ajuda' para a lista de comandos.", cmd)),
         };
+        if out.ok {
+            if let Some(n) = &need {
+                self.after_equip(n);
+            }
+            // o que foi instalado ou usado fica no lugar: a mão volta a ficar livre
+            let consumes = matches!(cmd.as_str(), "conectar" | "isolar" | "carregar" | "embalar" | "extrair");
+            if self.strict && consumes {
+                self.equip.hand = None;
+            }
+            if cmd == "midia" && a(1) == "remover" {
+                let slot = a(3).to_uppercase();
+                if let Some(mid) = self.case.items.iter().find(|i| i.id.eq_ignore_ascii_case(&a(2))).and_then(|i| i.slots.iter().find(|s| s.id.eq_ignore_ascii_case(&slot))).and_then(|s| s.media_id.clone()) {
+                    self.equip.removed.insert(mid);
+                }
+            }
+        }
         self.explain_error(out, &cmd, &toks)
     }
 

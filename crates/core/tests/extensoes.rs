@@ -1,7 +1,7 @@
 //! Extensões do gerador 1.1.0: compatibilidade com 1.0.0, cifragem por hardware com
 //! ordem de inicialização, arquivos danificados e cadeia ARC.
 
-use pericia_core::casegen::{generate, generate_v, GEN_VERSION, SUPPORTED_GEN_VERSIONS};
+use pericia_core::casegen::{generate_classic as generate, generate_v, GEN_VERSION, SUPPORTED_GEN_VERSIONS};
 use pericia_core::engine::Sim;
 use pericia_core::model::*;
 

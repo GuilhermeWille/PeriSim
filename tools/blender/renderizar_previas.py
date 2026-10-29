@@ -1,6 +1,6 @@
 """Renderiza uma prévia de cada modelo de assets/blender/modelos.blend (Cycles, CPU).
 
-Uso: python3 tools/blender/renderizar_previas.py <assets> <saida_png>
+Uso: python3 tools/blender/renderizar_previas.py <assets> <saida_png> [nome1,nome2,...]
 Gera <saida_png>/<modelo>.png (640×480) e uma folha de contato montada pelo chamador.
 """
 
@@ -28,6 +28,9 @@ def main():
     mundo.color = (0.18, 0.19, 0.21)
     cena.world = mundo
     objs = [o for o in cena.objects if o.type == "MESH"]
+    if len(sys.argv) > 3:  # filtro opcional: nomes separados por vírgula
+        quero = set(sys.argv[3].split(","))
+        objs = [o for o in objs if o.name in quero]
     cam = bpy.data.objects.new("cam", bpy.data.cameras.new("cam"))
     cena.collection.objects.link(cam)
     cena.camera = cam
@@ -40,8 +43,9 @@ def main():
     preench.data.size = 3
     cena.collection.objects.link(preench)
     for ob in objs:
-        for o in objs:
-            o.hide_render = o is not ob
+        for o in cena.objects:
+            if o.type == "MESH":
+                o.hide_render = o is not ob
         dim = ob.dimensions
         centro = ob.matrix_world @ (sum((Vector(c) for c in ob.bound_box), Vector()) / 8)
         raio = max(dim) * 0.9 + 0.05

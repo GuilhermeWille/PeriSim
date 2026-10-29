@@ -6,6 +6,7 @@ use crate::render::*;
 use macroquad::prelude::*;
 use pericia_core::engine::Sim;
 use pericia_core::model::*;
+use pericia_core::model::Vestigio;
 
 pub const EYE: f32 = 1.62;
 
@@ -67,6 +68,7 @@ pub fn build(r: &mut Renderer, sim: &Sim, selected: Option<&str>, hover: Option<
         lab(r, &mut w);
     }
     let n = visible.len().max(1) as f32;
+    let mut item_spots: Vec<(String, Vec3, Vec3, Vec3)> = vec![];
     for (k, it) in visible.iter().enumerate() {
         let x = -span_x / 2.0 + (k as f32 + 0.5) * (span_x / n);
         let mut base = vec3(x, surface_y, base_z);
@@ -85,18 +87,209 @@ pub fn build(r: &mut Renderer, sim: &Sim, selected: Option<&str>, hover: Option<
             outline(r, center, half + Vec3::splat(0.015), if sel { Color::new(1.0, 0.85, 0.2, 1.0) } else { Color::new(0.6, 0.85, 1.0, 1.0) });
         }
         w.picks.push(Pick { id: it.id.clone(), center, half, label: format!("{} · {}", it.id, short_label(it)) });
+        item_spots.push((it.id.clone(), base, center, half));
     }
+    decor(r, local, &mut w, sim);
+    vestigios(r, sim, &mut w, &item_spots, local, selected, hover);
     // ferramentas do perito (na bancada ou na mesa de apoio)
-    let tools_at = if local { vec3(2.25, 0.735, 0.95) } else { vec3(-0.9, 0.905, 0.0) };
+    let tools_at = if local { vec3(2.1, 0.72, 0.95) } else { vec3(-0.9, 0.905, 0.0) };
     let wb_on = sim.hashes.keys().any(|k| k.starts_with("wb:"));
     tool_writeblocker(r, tools_at, wb_on);
     w.picks.push(Pick { id: "TOOL-WB".into(), center: tools_at + vec3(0.0, 0.04, 0.0), half: vec3(0.12, 0.05, 0.08), label: "Bloqueador de escrita".into() });
-    tool_camera(r, tools_at + vec3(0.35, 0.0, 0.05));
-    w.picks.push(Pick { id: "TOOL-CAM".into(), center: tools_at + vec3(0.35, 0.06, 0.05), half: vec3(0.09, 0.06, 0.06), label: "Câmera fotográfica".into() });
-    tool_bags(r, tools_at + vec3(0.8, 0.0, 0.0));
-    w.picks.push(Pick { id: "TOOL-BAG".into(), center: tools_at + vec3(0.85, 0.02, 0.0), half: vec3(0.22, 0.04, 0.12), label: "Embalagens, Faraday bag e lacres".into() });
+    let eq = &sim.equip;
+    // cadeia montada: cabo SATA/adaptador junto ao bloqueador, mídia retirada ao lado, cabo USB para a estação
+    let mut k = 0.0;
+    for (mid, dest) in &eq.linked {
+        let at = tools_at + vec3(-0.12 - k, 0.0, 0.16);
+        let mk = sim.case.media.iter().find(|m| &m.id == mid).map(|m| m.kind);
+        match mk {
+            Some(MediaKind::Hdd) => hdd(r, at + vec3(-0.08, 0.013, 0.0), false),
+            Some(MediaKind::Nvme) => nvme(r, at + vec3(-0.08, 0.002, 0.0)),
+            _ => {
+                r.model("ssd_25", at + vec3(-0.08, 0.0, 0.0), 0.0, &[]);
+            }
+        }
+        let cabo = match mk {
+            Some(MediaKind::Nvme) => "adaptador_m2",
+            Some(MediaKind::Sd) => "leitor_sd",
+            Some(MediaKind::Usb) => "",
+            _ => "cabo_sata",
+        };
+        if !cabo.is_empty() {
+            r.model(cabo, at + vec3(0.02, 0.0, -0.02), 0.4, &[]);
+        }
+        if dest == "estacao" {
+            r.bx(at + vec3(0.0, 0.004, -0.35), vec3(0.006, 0.006, 0.7), plastic(rgb(200, 40, 40)));
+        }
+        k += 0.22;
+    }
+    for mid in eq.removed.iter().filter(|m| !eq.linked.contains_key(*m)) {
+        let at = tools_at + vec3(0.12 + k, 0.0, 0.18);
+        match sim.case.media.iter().find(|m| &m.id == mid).map(|m| m.kind) {
+            Some(MediaKind::Nvme) => nvme(r, at + vec3(0.0, 0.002, 0.0)),
+            Some(MediaKind::Ssd) => {
+                r.model("ssd_25", at, 0.0, &[]);
+            }
+            _ => hdd(r, at + vec3(0.0, 0.013, 0.0), false),
+        }
+        k += 0.16;
+    }
+    if eq.blocker_host {
+        r.model("cabo_usb", tools_at + vec3(0.14, 0.0, -0.08), 0.0, &[]);
+    }
+    if eq.hand != Some(pericia_core::equip::Tool::Camera) {
+        tool_camera(r, tools_at + vec3(0.35, 0.0, 0.05));
+        w.picks.push(Pick { id: "TOOL-CAM".into(), center: tools_at + vec3(0.35, 0.06, 0.05), half: vec3(0.09, 0.06, 0.06), label: "Câmera fotográfica — clique para pegar".into() });
+    }
+    // maleta pericial (todas as ferramentas, luvas e pulseira)
+    let (maleta_at, maleta_rot) = if local { (vec3(2.82, 0.72, 0.95), -std::f32::consts::FRAC_PI_2) } else { (vec3(2.0, 0.72, 1.0), -std::f32::consts::FRAC_PI_2) };
+    if !local {
+        table(r, vec3(2.0, 0.0, 1.0), vec3(1.0, 0.72, 0.6), metal(rgb(150, 154, 160)), metal(rgb(90, 92, 98)));
+        w.colliders.push(col((1.5, 0.7), (2.5, 1.3)));
+    }
+    if !r.model("maleta_pericial", maleta_at, maleta_rot, &[]) {
+        r.bx(maleta_at + vec3(0.0, 0.06, 0.0), vec3(0.4, 0.12, 0.55), plastic(rgb(40, 42, 46)));
+    }
+    let side = if local { vec3(-0.45, 0.0, -0.18) } else { vec3(-0.42, 0.0, -0.18) };
+    r.model("caixa_luvas", maleta_at + side, 0.3, &[]);
+    r.model("pulseira_esd", maleta_at + side + vec3(0.02, 0.0, 0.3), 0.0, &[]);
+    w.picks.push(Pick { id: "MALETA".into(), center: maleta_at + vec3(0.0, 0.15, 0.0), half: vec3(0.3, 0.2, 0.32), label: "Maleta pericial — ferramentas, luvas e pulseira".into() });
     w
 }
+
+// ------------------------------------------------------------------ decoração
+
+/// Peça de parede: `wall` = 'B' fundo (z−), 'F' frente (z+), 'E' esquerda (x−), 'D' direita (x+).
+fn on_wall(r: &mut Renderer, name: &str, wall: char, pos: f32, y: f32) {
+    let (at, rot) = match wall {
+        'B' => (vec3(pos, y, -2.99), 0.0),
+        'F' => (vec3(pos, y, 2.99), std::f32::consts::PI),
+        'E' => (vec3(-3.49, y, pos), std::f32::consts::FRAC_PI_2),
+        _ => (vec3(3.49, y, pos), -std::f32::consts::FRAC_PI_2),
+    };
+    r.model(name, at, rot, &[]);
+}
+
+fn decor(r: &mut Renderer, local: bool, w: &mut World, sim: &Sim) {
+    if local {
+        on_wall(r, "pintura_parede", 'B', 0.0, 1.45);
+        on_wall(r, "calendario", 'B', 1.45, 1.05);
+        on_wall(r, "relogio_parede", 'B', -1.25, 1.85);
+        on_wall(r, "quadro_cortica", 'E', -1.6, 1.0);
+        // objetos pessoais na mesa do investigado
+        r.model("porta_retrato", vec3(0.72, 0.765, -1.33), 0.25, &[]);
+        r.model("cinzeiro", vec3(-0.72, 0.765, -1.3), 0.0, &[]);
+        if sim.case.vestigios.iter().any(|v| v.kind == "copo") {
+            r.model("copo_cafe", vec3(0.42, 0.765, -1.32), 0.0, &[]);
+        }
+        r.model("lixeira", vec3(1.05, 0.0, -0.35), 0.0, &[]);
+        w.colliders.push(col((0.88, -0.52), (1.22, -0.18)));
+    } else {
+        on_wall(r, "placa_lab", 'B', 0.62, 2.22);
+        on_wall(r, "quadro_branco", 'B', 0.65, 1.0);
+        on_wall(r, "cartaz_pop", 'B', -0.45, 0.95);
+        on_wall(r, "quadro_cortica", 'E', -1.55, 1.0);
+        on_wall(r, "cartaz_epi", 'F', 0.6, 1.0);
+        on_wall(r, "relogio_parede", 'F', -1.2, 1.95);
+        r.model("lixeira", vec3(1.55, 0.0, -1.35), 0.0, &[]);
+        w.colliders.push(col((1.38, -1.52), (1.72, -1.18)));
+    }
+    r.model("extintor", vec3(2.82, 0.0, 2.84), std::f32::consts::PI, &[]);
+    w.colliders.push(col((2.7, 2.7), (2.95, 2.95)));
+}
+
+// ------------------------------------------------------------------ vestígios
+
+/// Mancha (decalque horizontal com a textura de sangue seco).
+fn decal(r: &mut Renderer, c: Vec3, size: f32, rot: f32, color: Color) {
+    let (s, co) = rot.sin_cos();
+    let h = size / 2.0;
+    let p = |x: f32, z: f32| c + vec3(x * co + z * s, 0.0, -x * s + z * co);
+    let uv = [vec2(0., 0.), vec2(1., 0.), vec2(1., 1.), vec2(0., 1.)];
+    r.quad(Tex::Blood, [p(-h, -h), p(h, -h), p(h, h), p(-h, h)], uv, vec3(0.0, 1.0, 0.0), color, 0.3, false);
+}
+
+/// Fio de cabelo: segmentos finos numa curva suave.
+fn hair(r: &mut Renderer, start: Vec3, len: f32, seed: f32) {
+    let n = 14;
+    let mut p = start;
+    let mut a = seed;
+    let seg = len / n as f32;
+    for k in 0..n {
+        a += (seed * 3.1 + k as f32 * 0.9).sin() * 0.35;
+        let q = p + vec3(a.cos() * seg, 0.0, a.sin() * seg);
+        r.boxr((p + q) / 2.0, vec3(seg * 1.1, 0.0012, 0.0016), -a, plain(rgb(38, 26, 20)));
+        p = q;
+    }
+}
+
+fn vestigio_pos(v: &Vestigio, spots: &[(String, Vec3, Vec3, Vec3)], local: bool) -> Vec3 {
+    match v.spot.as_str() {
+        "item" => {
+            if let Some((_, _, c, h)) = spots.iter().find(|s| Some(&s.0) == v.on_item.as_ref()) {
+                let dx = if v.kind == "cabelo" { -0.03 } else { 0.03 };
+                return *c + vec3(dx, h.y + 0.003, 0.02);
+            }
+            vec3(0.0, 0.91, -0.2)
+        }
+        "piso_mesa" => {
+            if v.kind == "pegada" {
+                vec3(0.62, 0.009, -0.38)
+            } else {
+                vec3(0.38, 0.009, -0.55)
+            }
+        }
+        "teclado" => vec3(-0.18, 0.771, -0.78),
+        "cinzeiro" => vec3(-0.72, 0.80, -1.3),
+        "mesa" => vec3(0.42, 0.87, -1.32),
+        _ => if local { vec3(0.0, 0.77, -0.9) } else { vec3(0.0, 0.91, -0.2) },
+    }
+}
+
+fn vestigios(r: &mut Renderer, sim: &Sim, w: &mut World, spots: &[(String, Vec3, Vec3, Vec3)], local: bool, selected: Option<&str>, hover: Option<&str>) {
+    let dried = Color::new(0.62, 0.30, 0.27, 0.99);
+    for (k, v) in sim.case.vestigios.iter().enumerate() {
+        let p = vestigio_pos(v, spots, local);
+        let seed = k as f32 * 1.7 + 0.4;
+        let half = match v.kind.as_str() {
+            "sangue" => {
+                if v.spot == "item" {
+                    decal(r, p, 0.07, seed, dried);
+                    vec3(0.05, 0.02, 0.05)
+                } else {
+                    // gotas espaçadas, como num rastro
+                    decal(r, p, 0.34, seed, dried);
+                    for (j, (dx, dz, s)) in [(0.32, -0.12, 0.12), (0.52, -0.2, 0.09), (-0.28, 0.1, 0.1)].iter().enumerate() {
+                        decal(r, p + vec3(*dx, 0.0005 * j as f32, *dz), *s, seed + j as f32, dried);
+                    }
+                    vec3(0.3, 0.03, 0.2)
+                }
+            }
+            "pegada" => {
+                for j in 0..3 {
+                    r.boxr(p + vec3(0.0, 0.0005, -0.06 + j as f32 * 0.05), vec3(0.08, 0.001, 0.012), 0.3, M { t: Tex::Blood, c: Color::new(0.35, 0.18, 0.16, 0.99), tile: 1.0, spec: 0.1, emis: false });
+                }
+                vec3(0.08, 0.03, 0.1)
+            }
+            "cabelo" => {
+                hair(r, p, if v.spot == "item" { 0.12 } else { 0.2 }, seed);
+                vec3(0.08, 0.02, 0.06)
+            }
+            _ => vec3(0.07, 0.06, 0.07),
+        };
+        if let Some(n) = sim.equip.markers.get(&v.id) {
+            let mp = if v.spot == "item" { spots.iter().find(|s| Some(&s.0) == v.on_item.as_ref()).map(|s| s.1 + vec3(0.18 + 0.05 * (*n as f32 % 2.0), 0.0, 0.12)).unwrap_or(p) } else { vec3(p.x + 0.2, if p.y < 0.1 { 0.0 } else { p.y - 0.006 }, p.z + 0.18) };
+            r.model("placa_vestigio", mp, 0.0, &[]);
+        }
+        let center = p + vec3(0.0, half.y * 0.5, 0.0);
+        let sel = selected == Some(v.id.as_str());
+        if sel || hover == Some(v.id.as_str()) {
+            outline(r, center, half + Vec3::splat(0.01), if sel { Color::new(1.0, 0.85, 0.2, 1.0) } else { Color::new(0.6, 0.85, 1.0, 1.0) });
+        }
+        w.picks.push(Pick { id: v.id.clone(), center, half, label: format!("{} · {}", v.id, v.label) });
+    }
+}
+
 
 pub fn short_label(it: &Item) -> String {
     let mut s = it.kind.label().to_string();
@@ -282,9 +475,6 @@ fn lab(r: &mut Renderer, w: &mut World) {
     }
     w.colliders.push(col((2.1, -2.95), (3.1, -2.35)));
     shelf(r, vec3(3.05, 0.0, 0.2), w);
-    // quadro de procedimento na parede
-    r.bx(vec3(0.6, 1.65, -2.99), vec3(1.2, 0.8, 0.02), plain(rgb(245, 245, 245)));
-    r.bx(vec3(0.6, 1.65, -2.975), vec3(1.1, 0.7, 0.005), m(Tex::Label, WHITE, 1.1, 0.0));
 }
 
 fn shelf(r: &mut Renderer, c: Vec3, w: &mut World) {
@@ -397,15 +587,6 @@ fn tool_camera(r: &mut Renderer, at: Vec3) {
     r.bx(at + vec3(0.0, 0.05, 0.086), vec3(0.05, 0.05, 0.002), glow(rgb(20, 30, 50)));
 }
 
-fn tool_bags(r: &mut Renderer, at: Vec3) {
-    if r.model("kit_embalagem", at, 0.0, &[]) {
-        return;
-    }
-    r.boxr(at + vec3(-0.12, 0.006, 0.0), vec3(0.24, 0.012, 0.17), 0.2, metal(rgb(150, 160, 170)));
-    r.boxr(at + vec3(0.16, 0.012, 0.02), vec3(0.2, 0.02, 0.14), -0.3, m(Tex::Fabric, rgb(90, 90, 90), 0.1, 0.1));
-    r.cyl(at + vec3(0.36, 0.03, -0.03), 0.045, 0.06, plastic(rgb(220, 60, 50)));
-    r.cyl(at + vec3(0.36, 0.031, -0.03), 0.02, 0.062, plain(rgb(240, 240, 240)));
-}
 
 // ------------------------------------------------------------------ equipamentos
 
@@ -475,7 +656,7 @@ fn nvme(r: &mut Renderer, at: Vec3) {
     r.bx(at + vec3(-0.037, 0.0, 0.0), vec3(0.006, 0.0018, 0.02), metal(rgb(210, 180, 80)));
 }
 
-fn tower(r: &mut Renderer, _sim: &Sim, it: &Item, base: Vec3) -> Vec3 {
+fn tower(r: &mut Renderer, sim: &Sim, it: &Item, base: Vec3) -> Vec3 {
     let (w, h, d) = (0.21, 0.45, 0.46);
     let c = base + vec3(0.0, h / 2.0, 0.0);
     let body = plastic(if it.is_server { rgb(40, 42, 48) } else { rgb(62, 66, 76) });
@@ -522,7 +703,7 @@ fn tower(r: &mut Renderer, _sim: &Sim, it: &Item, base: Vec3) -> Vec3 {
         }
         let mut k = 0.0;
         for sl in &it.slots {
-            if sl.media_id.is_none() || sl.hidden_by.is_some() {
+            if sl.media_id.is_none() || sl.hidden_by.is_some() || sl.media_id.as_ref().map(|m| sim.equip.removed.contains(m)).unwrap_or(false) {
                 continue;
             }
             if sl.iface == "NVMe" {

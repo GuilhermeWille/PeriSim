@@ -1,7 +1,7 @@
 //! Testes de integração: geração reprodutível, consistência das evidências e
 //! fluxos completos de cada módulo POP executados pelo mesmo `exec` usado pela interface.
 
-use pericia_core::casegen::{case_id, generate, parse_case_id, GEN_VERSION};
+use pericia_core::casegen::{case_id, generate_classic as generate, parse_case_id, GEN_VERSION};
 use pericia_core::engine::Sim;
 use pericia_core::model::*;
 use pericia_core::{assess, report, vfs};
@@ -41,7 +41,7 @@ fn id_do_caso_ida_e_volta() {
     let id = case_id(ModuleId::M504, 3, 0x00ABCDEF);
     assert_eq!(parse_case_id(&id), Some((ModuleId::M504, 3, 0x00ABCDEF)));
     assert_eq!(parse_case_id("lixo"), None);
-    assert_eq!(GEN_VERSION, generate(ModuleId::M501, 1, 1).gen_version);
+    assert_eq!(GEN_VERSION, pericia_core::casegen::generate(ModuleId::M501, 1, 1).gen_version);
 }
 
 fn source_exists(c: &CaseFile, src: &SourceRef) -> bool {

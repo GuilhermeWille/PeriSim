@@ -1,5 +1,5 @@
 //! Testes do Linux simulado da estação: shell, comandos gerais e integração com o motor.
-use pericia_core::casegen::generate;
+use pericia_core::casegen::generate_classic as generate;
 use pericia_core::engine::Sim;
 use pericia_core::model::ModuleId;
 use pericia_core::os::{shell::run_line, Os, Shell};

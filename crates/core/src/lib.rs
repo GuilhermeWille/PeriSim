@@ -31,3 +31,4 @@ pub mod phone;
 pub mod cloud;
 pub mod os;
 pub mod tablet;
+pub mod equip;

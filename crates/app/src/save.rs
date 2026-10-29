@@ -203,6 +203,9 @@ pub struct Settings {
     pub vol_ui: f32,
     pub muted: bool,
     pub footsteps: bool,
+    /// Música ambiente (jazz noir) ligada e seu volume.
+    pub music_on: bool,
+    pub vol_music: f32,
     // controles
     pub mouse_sens: f32,
     pub invert_y: bool,
@@ -225,6 +228,8 @@ impl Default for Settings {
             vol_ui: 0.6,
             muted: false,
             footsteps: true,
+            music_on: true,
+            vol_music: 0.45,
             mouse_sens: 1.0,
             invert_y: false,
             fov_deg: 70.0,
@@ -236,13 +241,13 @@ impl Default for Settings {
 
 impl Settings {
     pub fn volumes(&self) -> crate::audio::Volumes {
-        crate::audio::Volumes { master: self.vol_master, cat: [self.vol_ambient, self.vol_effects, self.vol_ui], muted: self.muted }
+        crate::audio::Volumes { master: self.vol_master, cat: [self.vol_ambient, self.vol_effects, self.vol_ui, self.vol_music], muted: self.muted }
     }
     pub fn to_json(&self) -> String {
         json!({
             "ui_scale": self.ui_scale, "render3d": self.render3d, "low_power": self.low_power, "shadows": self.shadows,
             "vol_master": self.vol_master, "vol_ambient": self.vol_ambient, "vol_effects": self.vol_effects, "vol_ui": self.vol_ui,
-            "muted": self.muted, "footsteps": self.footsteps,
+            "muted": self.muted, "footsteps": self.footsteps, "music_on": self.music_on, "vol_music": self.vol_music,
             "mouse_sens": self.mouse_sens, "invert_y": self.invert_y, "fov_deg": self.fov_deg,
             "show_hints": self.show_hints, "held_tablet": self.held_tablet,
         })
@@ -265,6 +270,8 @@ impl Settings {
             vol_ui: f("vol_ui", d.vol_ui, 0.0, 1.0),
             muted: b("muted", d.muted),
             footsteps: b("footsteps", d.footsteps),
+            music_on: b("music_on", d.music_on),
+            vol_music: f("vol_music", d.vol_music, 0.0, 1.0),
             mouse_sens: f("mouse_sens", d.mouse_sens, 0.2, 3.0),
             invert_y: b("invert_y", d.invert_y),
             fov_deg: f("fov_deg", d.fov_deg, 55.0, 95.0),
@@ -324,7 +331,7 @@ mod tests {
 
     #[test]
     fn replay_com_terminal_linux_reproduz_a_auditoria() {
-        use pericia_core::casegen::generate;
+        use pericia_core::casegen::generate_classic as generate;
         use pericia_core::model::ModuleId;
         let id = "C501-D1-00000007";
         // sessão "ao vivo"
@@ -342,7 +349,7 @@ mod tests {
             log.push(format!("\u{1}sh {}\t{}", cwd, line));
         }
         let trail: Vec<String> = sim.audit.entries.iter().map(|e| e.hash[..12].to_string()).collect();
-        let sg = super::SaveGame { case_id: id.into(), gen_version: pericia_core::casegen::GEN_VERSION.into(), commands: log.clone(), audit_format: 2, audit_last_hash: Some(sim.audit.last_hash()), audit_trail: trail.clone() };
+        let sg = super::SaveGame { case_id: id.into(), gen_version: "1.1.0".into(), commands: log.clone(), audit_format: 2, audit_last_hash: Some(sim.audit.last_hash()), audit_trail: trail.clone() };
         let (r, ros, warn) = super::replay_checked(&sg).unwrap();
         assert_eq!(r.audit.last_hash(), sim.audit.last_hash());
         assert!(warn.is_empty(), "{:?}", warn);
@@ -359,7 +366,7 @@ mod tests {
 
     #[test]
     fn salvamento_antigo_formato_1_e_conferido_pelo_hash_legado() {
-        use pericia_core::casegen::generate;
+        use pericia_core::casegen::generate_classic as generate;
         use pericia_core::model::ModuleId;
         let log = vec!["fotografar item-01".to_string(), "lacre conferir item-01".to_string()];
         let mut sim = pericia_core::engine::Sim::new(generate(ModuleId::M501, 1, 7));

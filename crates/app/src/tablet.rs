@@ -324,7 +324,9 @@ fn local_blocks(sim: &Sim) -> Vec<B> {
 
 const CONTROLES: &str = "\
 Deslocamento: W A S D (Shift corre) · olhar: botão direito ou Tab (captura o mouse)
-Interagir com o objeto na mira: clique ou E — abre o painel compacto de ações
+Interagir com o objeto na mira: clique ou E — abre o painel de etapas do objeto
+Maleta pericial: aproxime-se e use E — pegar ferramenta, calçar/trocar luvas, pulseira antiestática
+Uma ferramenta por vez na mão; G devolve a ferramenta à maleta. Botões com ícone pedem a ferramenta certa
 Tablet: T abre e fecha (Esc também fecha); nada muda no caso ao abrir ou fechar
 Estação pericial: aproxime-se do computador da bancada e interaja
 Terminal: botão Terminal na barra superior; 'ajuda' lista os comandos
