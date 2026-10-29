@@ -251,7 +251,7 @@ dependencies = [
 
 [[package]]
 name = "pericia_app"
-version = "0.4.0"
+version = "0.5.0"
 dependencies = [
  "macroquad",
  "pericia_core",
@@ -260,7 +260,7 @@ dependencies = [
 
 [[package]]
 name = "pericia_core"
-version = "0.4.0"
+version = "0.5.0"
 dependencies = [
  "serde",
  "serde_json",

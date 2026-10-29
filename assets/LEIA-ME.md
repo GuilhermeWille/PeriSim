@@ -1,6 +1,32 @@
 # Recursos visuais externos (modelos 3D e texturas)
 
-Esta pasta recebe modelos e texturas fornecidos para o Perícia Sim. **Ela está vazia de propósito**: sem arquivos aqui, o simulador usa a geometria e as texturas procedurais de sempre. Nada é obrigatório.
+Esta pasta guarda os modelos 3D do Perícia Sim e recebe texturas/modelos fornecidos. Nada é obrigatório: sem um arquivo aqui, o simulador usa a geometria procedural correspondente.
+
+## Modelos incluídos (gerados no Blender 5.2)
+
+`models/` traz 13 modelos OBJ/MTL gerados pelo script `tools/blender/gerar_modelos.py`; a fonte editável é `blender/modelos.blend`. Cerca de 9 100 triângulos no total.
+
+| Arquivo | Onde aparece | Triângulos |
+|---|---|---|
+| `cadeira_escritorio` | cadeiras do laboratório e do escritório | 1 348 |
+| `mesa_escritorio` | mesa do investigado (POP 5.03) | 488 |
+| `mesa_estacao` | mesa da estação pericial | 488 |
+| `monitor` | monitores (a área `tela` recebe a imagem da sessão Linux) | 298 |
+| `gabinete_pc` | gabinete da estação e computadores apreendidos fechados | 432 |
+| `notebook` | notebooks apreendidos (a `tela` mostra o estado) | 322 |
+| `celular` | celulares apreendidos (a `tela` mostra o estado) | 374 |
+| `bancada_lab` | bancada antiestática do laboratório | 952 |
+| `armario_aco` | armário de evidências | 548 |
+| `estante_aco` | estante de caixas de evidência | 560 |
+| `estante_livros` | estante com livros do escritório | 2 284 |
+| `gaveteiro` | gaveteiro com a gaveta aberta | 444 |
+| `planta` | planta do escritório | 564 |
+
+Para regenerar depois de editar o script: `python3 tools/blender/gerar_modelos.py assets` (com o módulo `bpy`) ou `blender --background --python tools/blender/gerar_modelos.py -- assets`. Prévias renderizadas: `python3 tools/blender/renderizar_previas.py assets <pasta>`.
+
+Elementos que mudam com o caso (lacres, LEDs, telas, tampa aberta com componentes, mídias, ferramentas) continuam desenhados pelo jogo por cima dos modelos ou no lugar deles quando o estado exige (ex.: gabinete aberto).
+
+Convenções: metros; origem no centro da base; frente para +Z no jogo (+Y no Blender); o prefixo do nome do material escolhe a textura (`madeira`, `metal`, `plastico`, `tecido`, `manta`, `grade`, `teclado`, `etiqueta`, `ceramica`, `folhagem`, `tela`…); `Kd` tinge e `Ns` define o brilho.
 
 ## Regras
 
@@ -42,7 +68,7 @@ JPEG ainda não é decodificado: converta para PNG (ou habilite o decodificador,
 
 ## Modelos
 
-Hoje: arquivos **OBJ/MTL** em `assets/models/` são lidos e **validados** na inicialização (triangulação, vértices, materiais, caixa envolvente, texturas referenciadas); o resultado vai para `assets_relatorio.txt`. A colocação de um modelo na cena é feita depois de avaliar escala e aparência, um elemento por vez.
+Arquivos **OBJ/MTL** em `assets/models/` são lidos e validados na inicialização; o relatório vai para `assets_relatorio.txt` na pasta de dados. Um modelo com o mesmo nome de um da tabela acima o substitui diretamente; modelos com outros nomes ficam carregados, mas só aparecem quando o código da cena os usar.
 
 glTF/GLB, FBX, COLLADA e .blend: o inventário os descreve, mas carregar exige conversão para OBJ ou uma dependência nova (leitor glTF). Essa escolha será feita quando os arquivos chegarem, pela alternativa menos invasiva.
 

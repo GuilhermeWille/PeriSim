@@ -90,6 +90,7 @@ pub struct MtlMaterial {
     pub name: String,
     pub diffuse: [f32; 3],
     pub map_kd: Option<String>,
+    pub shininess: Option<f32>,
 }
 
 /// Leitor de OBJ (texto). Suporta v/vt/vn/f (polígonos triangulados em leque, índices
@@ -216,7 +217,12 @@ pub fn parse_mtl(text: &str) -> Vec<MtlMaterial> {
         let line = raw.split('#').next().unwrap_or("").trim();
         let mut it = line.split_whitespace();
         match it.next() {
-            Some("newmtl") => out.push(MtlMaterial { name: it.collect::<Vec<_>>().join(" "), diffuse: [1.0, 1.0, 1.0], map_kd: None }),
+            Some("newmtl") => out.push(MtlMaterial { name: it.collect::<Vec<_>>().join(" "), diffuse: [1.0, 1.0, 1.0], map_kd: None, shininess: None }),
+            Some("Ns") => {
+                if let (Some(m), Some(v)) = (out.last_mut(), it.next().and_then(|x| x.parse::<f32>().ok())) {
+                    m.shininess = Some(v);
+                }
+            }
             Some("Kd") => {
                 let n: Vec<f32> = it.filter_map(|x| x.parse().ok()).collect();
                 if let (Some(m), true) = (out.last_mut(), n.len() >= 3) {
@@ -328,7 +334,7 @@ mod tests {
     #[test]
     fn mtl_le_cor_e_textura() {
         let m = parse_mtl("newmtl Madeira\nKd 0.5 0.3 0.1\nmap_Kd -s 2 2 1 texturas/madeira.png\n");
-        assert_eq!(m, vec![MtlMaterial { name: "Madeira".into(), diffuse: [0.5, 0.3, 0.1], map_kd: Some("texturas/madeira.png".into()) }]);
+        assert_eq!(m, vec![MtlMaterial { name: "Madeira".into(), diffuse: [0.5, 0.3, 0.1], map_kd: Some("texturas/madeira.png".into()), shininess: None }]);
     }
 
     #[test]
@@ -338,4 +344,57 @@ mod tests {
         assert!(validate_texture_dims(500, 512, false).is_ok());
         assert!(validate_texture_dims(4096, 4096, true).is_err());
     }
+}
+
+/// Carrega os modelos OBJ de assets/models para o renderizador. Materiais são associados às
+/// texturas do jogo pelo nome (ver `render::material_tex`); a cor difusa (Kd) vira tinta e
+/// o brilho (Ns) vira o especular. Modelo inválido é recusado com o motivo.
+pub fn load_models() -> (std::collections::HashMap<String, crate::render::Model>, Vec<String>) {
+    use crate::render::{material_tex, Model, ModelPart, M};
+    let mut out = std::collections::HashMap::new();
+    let mut log = vec![];
+    let Some(dir) = assets_dir().map(|d| d.join("models")) else { return (out, log) };
+    let Ok(rd) = std::fs::read_dir(&dir) else { return (out, log) };
+    let mut paths: Vec<PathBuf> = rd.filter_map(|e| e.ok().map(|e| e.path())).filter(|p| p.extension().map(|e| e == "obj").unwrap_or(false)).collect();
+    paths.sort();
+    for p in paths {
+        let name = p.file_stem().and_then(|s| s.to_str()).unwrap_or("").to_string();
+        let (mesh, mats) = match read_model(&p) {
+            Ok(x) => x,
+            Err(e) => {
+                log.push(format!("modelo {}: recusado ({})", name, e));
+                continue;
+            }
+        };
+        let mut parts = vec![];
+        for (mat, start, count) in &mesh.groups {
+            let mtl = mats.iter().find(|m| &m.name == mat);
+            let (t, tile, spec, emis) = material_tex(mat);
+            let c = mtl.map(|m| Color::new(m.diffuse[0], m.diffuse[1], m.diffuse[2], 1.0)).unwrap_or(WHITE);
+            let spec = mtl.and_then(|m| m.shininess).map(|ns| (ns / 1000.0).clamp(0.0, 1.0)).unwrap_or(spec);
+            // pedaços de até 4000 triângulos com vértices compartilhados e índices locais
+            let mut chunks = vec![];
+            for tri_chunk in mesh.indices[*start..*start + *count].chunks(3 * 4000) {
+                let mut map = std::collections::HashMap::new();
+                let mut verts = vec![];
+                let mut idx: Vec<u16> = vec![];
+                for &vi in tri_chunk {
+                    let id = *map.entry(vi).or_insert_with(|| {
+                        let v = mesh.vertices[vi as usize];
+                        verts.push((Vec3::from(v.pos), Vec3::from(v.normal), Vec2::from(v.uv)));
+                        (verts.len() - 1) as u16
+                    });
+                    idx.push(id);
+                }
+                chunks.push((verts, idx));
+            }
+            parts.push(ModelPart { material: mat.clone(), mt: M { t, c, tile, spec, emis }, chunks });
+        }
+        let (mn, mx) = bounds(&mesh).unwrap_or(([0.0; 3], [0.0; 3]));
+        let half = vec3((mx[0] - mn[0]) / 2.0, (mx[1] - mn[1]) / 2.0, (mx[2] - mn[2]) / 2.0);
+        let tri_count = mesh.indices.len() / 3;
+        log.push(format!("modelo '{}' carregado: {} triângulos, {} material(is), {:.2}×{:.2}×{:.2} m", name, tri_count, parts.len(), half.x * 2.0, half.y * 2.0, half.z * 2.0));
+        out.insert(name, Model { parts, half, tris: tri_count });
+    }
+    (out, log)
 }

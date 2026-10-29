@@ -249,8 +249,8 @@ fn main() {
             }
             "blend" => {
                 kind = "arquivo do Blender".into();
-                details = String::from_utf8_lossy(&b[..12.min(b.len())]).to_string();
-                compat = "incompatível sem conversão (exportar no Blender para OBJ/glTF)".into();
+                details = if b.starts_with(b"BLENDER") { String::from_utf8_lossy(&b[..12.min(b.len())]).to_string() } else if b.starts_with(&[0x28, 0xb5, 0x2f, 0xfd]) { "compactado (zstd)".into() } else { "cabeçalho não reconhecido".into() };
+                compat = "fonte editável; o jogo usa o OBJ exportado".into();
             }
             "dae" => {
                 kind = "modelo COLLADA".into();

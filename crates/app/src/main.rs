@@ -19,14 +19,20 @@ use pericia_core::engine::Sim;
 use pericia_core::model::*;
 use ui::*;
 
-fn conf() -> Conf {
-    Conf {
-        window_title: "Perícia Sim — Simulador de Informática Forense".into(),
-        window_width: 1280,
-        window_height: 760,
-        high_dpi: false,
-        sample_count: 1,
-        window_resizable: true,
+fn conf() -> macroquad::conf::Conf {
+    macroquad::conf::Conf {
+        miniquad_conf: Conf {
+            window_title: "Perícia Sim — Simulador de Informática Forense".into(),
+            window_width: 1280,
+            window_height: 760,
+            high_dpi: false,
+            sample_count: 1,
+            window_resizable: true,
+            ..Default::default()
+        },
+        // lotes grandes (modelos 3D): cada malha do renderizador cabe numa chamada de desenho
+        draw_call_vertex_capacity: render::MAX_BATCH_VERTS,
+        draw_call_index_capacity: render::MAX_BATCH_INDICES,
         ..Default::default()
     }
 }
@@ -79,6 +85,8 @@ pub struct App {
     pub show_help_overlay: bool,
     pub de: linuxde::LinuxDe,
     pub phone: phone::PhoneUi,
+    /// Legenda exibida em roteiros de demonstração (gravação de vídeo).
+    pub caption: Option<String>,
 }
 
 impl App {
@@ -830,9 +838,35 @@ struct Script {
     wait: u32,
     dir: String,
     pending: Option<String>,
+    /// Movimento suave do jogador: (origem, destino, yaw0, yaw1, pitch0, pitch1, total, feito).
+    anim: Option<(Vec3, Vec3, f32, f32, f32, f32, u32, u32)>,
+}
+
+/// Legenda de demonstração: faixa escura com o texto, na parte inferior central.
+fn draw_caption(app: &mut App, text: &str) {
+    let s = app.ui.scale;
+    let (title, body) = text.split_once(" | ").unwrap_or((text, ""));
+    let w = (app.ui.measure(title, 16.0, F::Bold).max(app.ui.measure(body, 13.0, F::Reg)) + 40.0 * s).min(screen_width() - 40.0 * s);
+    let h = if body.is_empty() { 40.0 * s } else { 62.0 * s };
+    let r = rect((screen_width() - w) / 2.0, screen_height() - h - 46.0 * s, w, h);
+    draw_rectangle(r.x, r.y, r.w, r.h, Color::new(0.02, 0.03, 0.05, 0.86));
+    draw_rectangle(r.x, r.y, 4.0 * s, r.h, T.highlight);
+    app.ui.text(title, r.x + 18.0 * s, r.y + 26.0 * s, 16.0, F::Bold, T.highlight);
+    if !body.is_empty() {
+        app.ui.text(body, r.x + 18.0 * s, r.y + 50.0 * s, 13.0, F::Reg, T.text);
+    }
 }
 
 fn run_script(app: &mut App, sc: &mut Script) -> bool {
+    if let Some((p0, p1, y0, y1, a0, a1, n, k)) = sc.anim {
+        let t = (k + 1) as f32 / n as f32;
+        let e = t * t * (3.0 - 2.0 * t); // suavização
+        app.player.pos = p0.lerp(p1, e);
+        app.player.yaw = y0 + (y1 - y0) * e;
+        app.player.pitch = a0 + (a1 - a0) * e;
+        sc.anim = if k + 1 >= n { None } else { Some((p0, p1, y0, y1, a0, a1, n, k + 1)) };
+        return true;
+    }
     if sc.wait > 0 {
         sc.wait -= 1;
         return true;
@@ -873,6 +907,43 @@ fn run_script(app: &mut App, sc: &mut Script) -> bool {
             }
             app.player.case = app.sim.as_ref().map(|s| s.case.id.clone()).unwrap_or_default();
         }
+        "walk" | "look" => {
+            // walk x z yaw pitch quadros | look yaw pitch quadros
+            let v: Vec<f32> = arg.split_whitespace().filter_map(|x| x.parse().ok()).collect();
+            let (to, yaw, pitch, n) = if k == "walk" && v.len() >= 5 {
+                (vec3(v[0], 0.0, v[1]), v[2], v[3], v[4] as u32)
+            } else if v.len() >= 3 {
+                (app.player.pos, v[0], v[1], v[2] as u32)
+            } else {
+                return true;
+            };
+            // menor giro angular
+            let mut y1 = yaw;
+            let y0 = app.player.yaw;
+            while y1 - y0 > std::f32::consts::PI {
+                y1 -= std::f32::consts::TAU;
+            }
+            while y1 - y0 < -std::f32::consts::PI {
+                y1 += std::f32::consts::TAU;
+            }
+            app.player.case = app.sim.as_ref().map(|s| s.case.id.clone()).unwrap_or_default();
+            sc.anim = Some((app.player.pos, to, y0, y1, app.player.pitch, pitch, n.max(1), 0));
+            sc.wait = 0;
+        }
+        "caption" => app.caption = if arg.is_empty() || arg == "off" { None } else { Some(arg) },
+        "panel" => app.show_help_overlay = arg == "on",
+        "cohere" => {
+            desktop::sync_laudo(app);
+            let c = pericia_core::report::check_coherence(app.sim.as_ref().unwrap());
+            app.desk.laudo_msg = if c.problems.is_empty() { "Nenhuma incoerência detectada entre o texto e a auditoria.".into() } else { format!("ATENÇÃO:\n- {}", c.problems.join("\n- ")) };
+        }
+        "export" => {
+            app.desk.laudo_msg = match save::export(app.sim.as_ref().unwrap()) {
+                Ok((p, md)) => format!("Exportado:\n{}\n{}", p.display(), md.display()),
+                Err(e) => format!("ERRO ao exportar: {}", e),
+            };
+        }
+        "deselect" => app.selected = None,
         "yaw" => app.player.yaw = arg.parse().unwrap_or(0.0),
         "pitch" => app.player.pitch = arg.parse().unwrap_or(0.0),
         "app" => {
@@ -992,6 +1063,7 @@ async fn main() {
         history: save::history(),
         show_help_overlay: false,
         phone: phone::PhoneUi::default(),
+        caption: None,
         de: linuxde::LinuxDe::new(),
     };
     // roteiro opcional para capturas automáticas (validação headless)
@@ -1001,7 +1073,10 @@ async fn main() {
         wait: 5,
         dir: std::env::var("PERICIA_SHOTS").unwrap_or_else(|_| ".".into()),
         pending: None,
+        anim: None,
     });
+    // gravação de vídeo de roteiro: limita a 30 quadros/s para que o tempo seja real
+    let realtime = std::env::var("PERICIA_REALTIME").is_ok();
     let mut shot_n = 0;
     let mut idle_frames = 0u32;
     let mut perf_log: Vec<f32> = vec![];
@@ -1013,12 +1088,25 @@ async fn main() {
             Screen::Menu => draw_menu(&mut app),
             Screen::Game => game(&mut app),
         }
+        if let Some(c) = app.caption.clone() {
+            draw_caption(&mut app, &c);
+        }
         perf_log.push(t0.elapsed().as_secs_f32() * 1000.0);
+        if realtime {
+            let el = t0.elapsed().as_secs_f32();
+            if el < 1.0 / 30.0 {
+                std::thread::sleep(std::time::Duration::from_secs_f32(1.0 / 30.0 - el));
+            }
+        }
         if let Some(sc) = &mut script {
             if sc.wait == 0 {
                 if let Some(name) = sc.pending.take() {
                     let n = if name.is_empty() { format!("{:02}", shot_n) } else { name };
-                    get_screen_data().export_png(&format!("{}/{}.png", sc.dir, n));
+                    let path = format!("{}/{}.png", sc.dir, n);
+                    if let Some(dir) = std::path::Path::new(&path).parent() {
+                        let _ = std::fs::create_dir_all(dir);
+                    }
+                    get_screen_data().export_png(&path);
                     shot_n += 1;
                 }
             }

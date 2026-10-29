@@ -184,6 +184,9 @@ fn table(r: &mut Renderer, c: Vec3, size: Vec3, top: M, legs: M) {
 }
 
 fn chair(r: &mut Renderer, c: Vec3, rot: f32) {
+    if r.model("cadeira_escritorio", c, rot, &[]) {
+        return;
+    }
     let fabric = m(Tex::Fabric, rgb(255, 255, 255), 0.25, 0.05);
     let dark = metal(rgb(60, 62, 68));
     r.cyl(c + vec3(0.0, 0.05, 0.0), 0.28, 0.04, dark);
@@ -195,6 +198,9 @@ fn chair(r: &mut Renderer, c: Vec3, rot: f32) {
 }
 
 fn monitor(r: &mut Renderer, at: Vec3, screen: M, scale: f32) {
+    if r.model_s("monitor", at, 0.0, scale, &[("tela", screen)]) {
+        return;
+    }
     let s = scale;
     let dark = plastic(rgb(40, 42, 46));
     r.bx(at + vec3(0.0, 0.012, 0.0) * s, vec3(0.24, 0.024, 0.16) * s, dark);
@@ -207,12 +213,18 @@ fn monitor(r: &mut Renderer, at: Vec3, screen: M, scale: f32) {
 
 /// Estação pericial completa: mesa, monitor com a tela capturada, gabinete, teclado, mouse.
 pub fn workstation(r: &mut Renderer, c: Vec3, w: &mut World) {
-    table(r, c, vec3(1.5, 0.75, 0.75), m(Tex::Wood, rgb(230, 220, 205), 0.9, 0.35), metal(rgb(70, 72, 78)));
+    if !r.model("mesa_estacao", c, 0.0, &[]) {
+        table(r, c, vec3(1.5, 0.75, 0.75), m(Tex::Wood, rgb(230, 220, 205), 0.9, 0.35), metal(rgb(70, 72, 78)));
+    }
     let top = c.y + 0.75;
     monitor(r, vec3(c.x, top, c.z - 0.18), emis(Tex::Desktop, WHITE), 1.15);
-    r.bx(vec3(c.x + 0.58, top + 0.23, c.z - 0.05), vec3(0.2, 0.46, 0.44), plastic(rgb(48, 50, 56)));
-    r.bx(vec3(c.x + 0.58, top + 0.23, c.z + 0.171), vec3(0.17, 0.42, 0.003), m(Tex::Vent, WHITE, 0.08, 0.2));
-    r.bx(vec3(c.x + 0.52, top + 0.42, c.z + 0.174), vec3(0.012, 0.012, 0.003), glow(rgb(60, 220, 120)));
+    if r.model("gabinete_pc", vec3(c.x + 0.58, top, c.z - 0.05), 0.0, &[]) {
+        r.bx(vec3(c.x + 0.63, top + 0.415, c.z + 0.183), vec3(0.01, 0.01, 0.003), glow(rgb(60, 220, 120)));
+    } else {
+        r.bx(vec3(c.x + 0.58, top + 0.23, c.z - 0.05), vec3(0.2, 0.46, 0.44), plastic(rgb(48, 50, 56)));
+        r.bx(vec3(c.x + 0.58, top + 0.23, c.z + 0.171), vec3(0.17, 0.42, 0.003), m(Tex::Vent, WHITE, 0.08, 0.2));
+        r.bx(vec3(c.x + 0.52, top + 0.42, c.z + 0.174), vec3(0.012, 0.012, 0.003), glow(rgb(60, 220, 120)));
+    }
     r.bx(vec3(c.x - 0.02, top + 0.012, c.z + 0.17), vec3(0.44, 0.022, 0.14), m(Tex::Keyboard, WHITE, 0.07, 0.2));
     r.bx(vec3(c.x + 0.32, top + 0.012, c.z + 0.18), vec3(0.06, 0.024, 0.1), plastic(rgb(36, 36, 40)));
     // bloqueador de escrita da estação
@@ -226,9 +238,15 @@ pub fn workstation(r: &mut Renderer, c: Vec3, w: &mut World) {
 fn lab(r: &mut Renderer, w: &mut World) {
     // bancada central com tampo antiestático e gaveteiros
     let bench_c = vec3(0.0, 0.0, -0.45);
-    r.bx(bench_c + vec3(0.0, 0.885, 0.0), vec3(2.6, 0.04, 1.1), m(Tex::Mat, WHITE, 0.5, 0.1));
-    r.bx(bench_c + vec3(0.0, 0.84, 0.0), vec3(2.64, 0.05, 1.14), metal(rgb(170, 176, 182)));
+    let bench_model = r.model("bancada_lab", bench_c, 0.0, &[]);
+    if !bench_model {
+        r.bx(bench_c + vec3(0.0, 0.885, 0.0), vec3(2.6, 0.04, 1.1), m(Tex::Mat, WHITE, 0.5, 0.1));
+        r.bx(bench_c + vec3(0.0, 0.84, 0.0), vec3(2.64, 0.05, 1.14), metal(rgb(170, 176, 182)));
+    }
     for sx in [-1.0, 1.0] {
+        if bench_model {
+            break;
+        }
         r.bx(bench_c + vec3(sx * 0.95, 0.41, 0.0), vec3(0.6, 0.82, 1.0), metal(rgb(196, 200, 206)));
         for k in 0..3 {
             r.bx(bench_c + vec3(sx * 0.95, 0.15 + k as f32 * 0.26, 0.505), vec3(0.56, 0.22, 0.01), metal(rgb(214, 218, 222)));
@@ -245,12 +263,16 @@ fn lab(r: &mut Renderer, w: &mut World) {
     // estação pericial junto à parede do fundo
     workstation(r, vec3(-1.6, 0.0, -2.5), w);
     // armário de evidências e estante
-    r.bx(vec3(2.6, 1.0, -2.65), vec3(1.0, 2.0, 0.6), metal(rgb(150, 156, 164)));
-    r.bx(vec3(2.6, 1.0, -2.345), vec3(0.01, 1.9, 0.005), plain(rgb(40, 40, 44)));
-    for sx in [-1.0, 1.0] {
-        r.bx(vec3(2.6 + sx * 0.06, 1.05, -2.33), vec3(0.02, 0.18, 0.03), metal(rgb(90, 92, 98)));
+    if r.model("armario_aco", vec3(2.6, 0.0, -2.65), 0.0, &[]) {
+        r.bx(vec3(2.6, 1.6, -2.325), vec3(0.3, 0.12, 0.005), m(Tex::Label, WHITE, 0.3, 0.0));
+    } else {
+        r.bx(vec3(2.6, 1.0, -2.65), vec3(1.0, 2.0, 0.6), metal(rgb(150, 156, 164)));
+        r.bx(vec3(2.6, 1.0, -2.345), vec3(0.01, 1.9, 0.005), plain(rgb(40, 40, 44)));
+        for sx in [-1.0, 1.0] {
+            r.bx(vec3(2.6 + sx * 0.06, 1.05, -2.33), vec3(0.02, 0.18, 0.03), metal(rgb(90, 92, 98)));
+        }
+        r.bx(vec3(2.6, 1.6, -2.34), vec3(0.3, 0.12, 0.005), m(Tex::Label, WHITE, 0.3, 0.0));
     }
-    r.bx(vec3(2.6, 1.6, -2.34), vec3(0.3, 0.12, 0.005), m(Tex::Label, WHITE, 0.3, 0.0));
     w.colliders.push(col((2.1, -2.95), (3.1, -2.35)));
     shelf(r, vec3(3.05, 0.0, 0.2), w);
     // quadro de procedimento na parede
@@ -259,12 +281,14 @@ fn lab(r: &mut Renderer, w: &mut World) {
 }
 
 fn shelf(r: &mut Renderer, c: Vec3, w: &mut World) {
-    let mt = metal(rgb(120, 126, 134));
-    for k in 0..5 {
-        r.bx(c + vec3(0.0, 0.1 + k as f32 * 0.45, 0.0), vec3(0.4, 0.03, 1.4), mt);
-    }
-    for sz in [-1.0, 1.0] {
-        r.bx(c + vec3(0.0, 1.0, sz * 0.69), vec3(0.4, 2.0, 0.03), mt);
+    if !r.model("estante_aco", c, -std::f32::consts::FRAC_PI_2, &[]) {
+        let mt = metal(rgb(120, 126, 134));
+        for k in 0..5 {
+            r.bx(c + vec3(0.0, 0.1 + k as f32 * 0.45, 0.0), vec3(0.4, 0.03, 1.4), mt);
+        }
+        for sz in [-1.0, 1.0] {
+            r.bx(c + vec3(0.0, 1.0, sz * 0.69), vec3(0.4, 2.0, 0.03), mt);
+        }
     }
     // caixas de evidência
     for k in 0..4 {
@@ -278,23 +302,37 @@ fn shelf(r: &mut Renderer, c: Vec3, w: &mut World) {
 fn office(r: &mut Renderer, w: &mut World) {
     // tapete, mesa de trabalho do investigado, cadeira, gaveteiro, estante, planta
     r.bx(vec3(0.0, 0.003, -0.4), vec3(2.6, 0.006, 1.8), m(Tex::Rug, WHITE, 2.6, 0.0));
-    table(r, vec3(0.0, 0.0, -1.05), vec3(1.8, 0.76, 0.8), m(Tex::Wood, WHITE, 0.9, 0.4), m(Tex::Wood, rgb(160, 140, 120), 0.6, 0.2));
+    if !r.model("mesa_escritorio", vec3(0.0, 0.0, -1.05), 0.0, &[]) {
+        table(r, vec3(0.0, 0.0, -1.05), vec3(1.8, 0.76, 0.8), m(Tex::Wood, WHITE, 0.9, 0.4), m(Tex::Wood, rgb(160, 140, 120), 0.6, 0.2));
+    }
     w.colliders.push(col((-0.95, -1.5), (0.95, -0.6)));
     chair(r, vec3(0.0, 0.0, -0.35), 0.0);
     // gaveteiro com gaveta aberta (onde pode haver mídia camuflada)
     let gv = vec3(1.45, 0.0, -1.0);
-    r.bx(gv + vec3(0.0, 0.35, 0.0), vec3(0.45, 0.7, 0.55), m(Tex::Wood, rgb(210, 190, 170), 0.6, 0.3));
-    r.bx(gv + vec3(0.0, 0.48, 0.32), vec3(0.4, 0.13, 0.1), m(Tex::Wood, rgb(200, 180, 160), 0.6, 0.3));
+    if !r.model("gaveteiro", gv, 0.0, &[]) {
+        r.bx(gv + vec3(0.0, 0.35, 0.0), vec3(0.45, 0.7, 0.55), m(Tex::Wood, rgb(210, 190, 170), 0.6, 0.3));
+        r.bx(gv + vec3(0.0, 0.48, 0.32), vec3(0.4, 0.13, 0.1), m(Tex::Wood, rgb(200, 180, 160), 0.6, 0.3));
+    }
     w.colliders.push(col((1.2, -1.3), (1.7, -0.6)));
     // estante com livros
     let est = vec3(-2.6, 0.0, -2.75);
+    let est_model = r.model("estante_livros", est, 0.0, &[]);
     for k in 0..5 {
+        if est_model {
+            break;
+        }
         r.bx(est + vec3(0.0, 0.05 + k as f32 * 0.45, 0.0), vec3(1.3, 0.03, 0.35), m(Tex::Wood, WHITE, 0.9, 0.3));
     }
     for sx in [-1.0, 1.0] {
+        if est_model {
+            break;
+        }
         r.bx(est + vec3(sx * 0.64, 0.95, 0.0), vec3(0.03, 1.9, 0.35), m(Tex::Wood, WHITE, 0.9, 0.3));
     }
     for k in 0..3 {
+        if est_model {
+            break;
+        }
         for b in 0..9 {
             let hgt = 0.22 + ((b * 7 + k * 3) % 5) as f32 * 0.02;
             let colr = [rgb(150, 40, 40), rgb(40, 70, 130), rgb(60, 110, 60), rgb(180, 150, 60), rgb(90, 60, 110)][(b + k) % 5];
@@ -309,8 +347,14 @@ fn office(r: &mut Renderer, w: &mut World) {
     w.colliders.push(col((-3.3, -2.95), (-1.9, -2.55)));
     // planta
     let pl = vec3(-2.9, 0.0, 2.3);
-    r.cyl(pl + vec3(0.0, 0.2, 0.0), 0.2, 0.4, m(Tex::Concrete, rgb(180, 120, 90), 0.4, 0.1));
+    let pl_model = r.model("planta", pl, 0.0, &[]);
+    if !pl_model {
+        r.cyl(pl + vec3(0.0, 0.2, 0.0), 0.2, 0.4, m(Tex::Concrete, rgb(180, 120, 90), 0.4, 0.1));
+    }
     for k in 0..7 {
+        if pl_model {
+            break;
+        }
         let a = k as f32 * 0.9;
         r.boxr(pl + vec3(a.cos() * 0.12, 0.6 + (k % 3) as f32 * 0.1, a.sin() * 0.12), vec3(0.08, 0.35, 0.02), a, m(Tex::Leaf, WHITE, 0.3, 0.2));
     }
@@ -407,6 +451,14 @@ fn tower(r: &mut Renderer, _sim: &Sim, it: &Item, base: Vec3) -> Vec3 {
     let c = base + vec3(0.0, h / 2.0, 0.0);
     let body = plastic(if it.is_server { rgb(40, 42, 48) } else { rgb(62, 66, 76) });
     let open = it.components.iter().any(|c| c.kind == "tampa" && c.removed) || it.flag("aberto");
+    if !open && r.model("gabinete_pc", base, 0.0, &[]) {
+        r.bx(c + vec3(0.05, h / 2.0 - 0.035, d / 2.0 + 0.004), vec3(0.01, 0.01, 0.003), if it.power_on { glow(rgb(70, 240, 120)) } else { plain(rgb(40, 50, 40)) });
+        if let Some(s) = &it.seal {
+            seal(r, c + vec3(-w / 2.0 - 0.003, 0.0, 0.0), vec3(0.002, h * 0.9, 0.03), s.intact);
+        }
+        tower_live(r, it, base);
+        return vec3(w / 2.0 + 0.02, h / 2.0, d / 2.0);
+    }
     r.bx(c + vec3(0.0, -h / 2.0 + 0.01, 0.0), vec3(w, 0.02, d), body);
     r.bx(c + vec3(0.0, h / 2.0 - 0.01, 0.0), vec3(w, 0.02, d), body);
     r.bx(c + vec3(0.0, 0.0, -d / 2.0 + 0.01), vec3(w, h, 0.02), body);
@@ -456,7 +508,12 @@ fn tower(r: &mut Renderer, _sim: &Sim, it: &Item, base: Vec3) -> Vec3 {
     if let Some(s) = &it.seal {
         seal(r, c + vec3(-w / 2.0 - 0.002, 0.0, 0.0), vec3(0.002, h * 0.9, 0.03), s.intact);
     }
-    // monitor e cabo de rede quando ligado no local
+    tower_live(r, it, base);
+    vec3(w / 2.0 + 0.02, h / 2.0, d / 2.0)
+}
+
+/// Monitor, teclado e cabo de rede do equipamento ligado no local.
+fn tower_live(r: &mut Renderer, it: &Item, base: Vec3) {
     if it.power_on && it.live.is_some() {
         let mounted = it.live.as_ref().map(|l| l.mounted_encrypted.is_some()).unwrap_or(false);
         let scr = glow(if mounted { rgb(70, 140, 210) } else { rgb(30, 40, 60) });
@@ -466,16 +523,17 @@ fn tower(r: &mut Renderer, _sim: &Sim, it: &Item, base: Vec3) -> Vec3 {
             r.bx(base + vec3(0.0, 0.005, -0.55), vec3(0.008, 0.008, 0.6), plastic(rgb(60, 120, 220)));
         }
     }
-    vec3(w / 2.0 + 0.02, h / 2.0, d / 2.0)
 }
 
 fn notebook(r: &mut Renderer, it: &Item, base: Vec3) -> Vec3 {
     let body = metal(rgb(110, 114, 122));
-    r.bx(base + vec3(0.0, 0.011, 0.0), vec3(0.34, 0.02, 0.24), body);
-    r.bx(base + vec3(0.0, 0.0215, 0.02), vec3(0.28, 0.001, 0.11), m(Tex::Keyboard, WHITE, 0.06, 0.2));
-    r.bx(base + vec3(0.0, 0.0215, 0.09), vec3(0.1, 0.001, 0.05), plastic(rgb(90, 94, 100)));
     let face = if it.power_on { glow(rgb(60, 120, 180)) } else { plain(rgb(14, 14, 18)) };
-    r.slab_tilt(base + vec3(0.0, 0.021, -0.118), 0.34, 0.22, 0.008, 0.25, body, face);
+    if !r.model("notebook", base, 0.0, &[("tela", face)]) {
+        r.bx(base + vec3(0.0, 0.011, 0.0), vec3(0.34, 0.02, 0.24), body);
+        r.bx(base + vec3(0.0, 0.0215, 0.02), vec3(0.28, 0.001, 0.11), m(Tex::Keyboard, WHITE, 0.06, 0.2));
+        r.bx(base + vec3(0.0, 0.0215, 0.09), vec3(0.1, 0.001, 0.05), plastic(rgb(90, 94, 100)));
+        r.slab_tilt(base + vec3(0.0, 0.021, -0.118), 0.34, 0.22, 0.008, 0.25, body, face);
+    }
     if it.flag("aberto") {
         nvme(r, base + vec3(0.25, 0.002, 0.05));
     }
@@ -491,8 +549,6 @@ fn phone(r: &mut Renderer, it: &Item, base: Vec3) -> Vec3 {
     let (w, d) = if tablet { (0.17, 0.25) } else { (0.072, 0.152) };
     let c = base + vec3(0.0, 0.0045, 0.0);
     let rf = ph.map(|p| p.rf).unwrap_or(Rf::Nenhum);
-    r.bx(c, vec3(w, 0.008, d), metal(rgb(40, 42, 48)));
-    r.bx(c + vec3(0.0, 0.0, 0.0), vec3(w + 0.002, 0.006, d - 0.004), plastic(rgb(30, 32, 36)));
     let scr = match ph {
         Some(p) if p.wiped => glow(rgb(235, 238, 245)),
         Some(p) if p.boot == Boot::Desligado => plain(rgb(8, 8, 10)),
@@ -500,9 +556,13 @@ fn phone(r: &mut Renderer, it: &Item, base: Vec3) -> Vec3 {
         Some(_) => glow(rgb(22, 34, 62)),
         None => plain(rgb(8, 8, 10)),
     };
-    r.bx(c + vec3(0.0, 0.0041, 0.0), vec3(w * 0.92, 0.0004, d * 0.94), scr);
+    if tablet || !r.model("celular", base, 0.0, &[("tela", scr)]) {
+        r.bx(c, vec3(w, 0.008, d), metal(rgb(40, 42, 48)));
+        r.bx(c + vec3(0.0, 0.0, 0.0), vec3(w + 0.002, 0.006, d - 0.004), plastic(rgb(30, 32, 36)));
+        r.bx(c + vec3(0.0, 0.0041, 0.0), vec3(w * 0.92, 0.0004, d * 0.94), scr);
+        r.bx(c + vec3(w / 2.0 + 0.0015, 0.0, -d * 0.18), vec3(0.002, 0.004, 0.03), metal(rgb(70, 72, 80)));
+    }
     r.bx(c + vec3(0.0, 0.0045, -d * 0.44), vec3(0.006, 0.0004, 0.006), plain(rgb(5, 5, 6)));
-    r.bx(c + vec3(w / 2.0 + 0.0015, 0.0, -d * 0.18), vec3(0.002, 0.004, 0.03), metal(rgb(70, 72, 80)));
     if ph.map(|p| p.screen_broken).unwrap_or(false) || it.physical.damage.iter().any(|x| x.contains("tela")) {
         for k in 0..5 {
             r.boxr(c + vec3(-0.012 + k as f32 * 0.006, 0.0046, 0.015 - k as f32 * 0.012), vec3(0.0012, 0.0003, 0.06), 0.35 + k as f32 * 0.55, glow(rgb(220, 225, 230)));

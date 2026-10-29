@@ -396,6 +396,49 @@ pub struct Lights {
 }
 
 pub const SHADOW_RES: u32 = 1024;
+/// Limites de um lote (malha por textura) — iguais à capacidade configurada no macroquad.
+pub const MAX_BATCH_VERTS: usize = 32768;
+pub const MAX_BATCH_INDICES: usize = 49152;
+
+/// Parte de um modelo com um único material.
+pub struct ModelPart {
+    /// Nome do material no MTL (permite substituir no momento de desenhar, ex.: "tela").
+    pub material: String,
+    pub mt: M,
+    /// Pedaços prontos para o lote: vértices (posição, normal, uv) e índices locais de 16 bits.
+    /// Montados uma vez no carregamento — por quadro só se transformam os vértices.
+    pub chunks: Vec<(Vec<(Vec3, Vec3, Vec2)>, Vec<u16>)>,
+}
+
+/// Modelo 3D carregado de assets/models (OBJ/MTL), em metros, origem no piso, frente para +Z.
+pub struct Model {
+    pub parts: Vec<ModelPart>,
+    pub half: Vec3,
+    pub tris: usize,
+}
+
+/// Material do modelo → textura do jogo, pelo prefixo do nome (`madeira_escura` → madeira).
+/// Devolve (textura, metros por repetição, brilho especular padrão, emissivo).
+pub fn material_tex(name: &str) -> (Tex, f32, f32, bool) {
+    let base = name.split(|c| c == '_' || c == '.').next().unwrap_or("").to_lowercase();
+    match base.as_str() {
+        "madeira" => (Tex::Wood, 0.9, 0.35, false),
+        "metal" => (Tex::Metal, 0.5, 0.5, false),
+        "plastico" | "borracha" => (Tex::Plastic, 0.4, 0.25, false),
+        "tecido" => (Tex::Fabric, 0.25, 0.05, false),
+        "manta" => (Tex::Mat, 0.5, 0.1, false),
+        "grade" => (Tex::Vent, 0.08, 0.2, false),
+        "teclado" => (Tex::Keyboard, 0.07, 0.2, false),
+        "etiqueta" => (Tex::Label, 0.3, 0.0, false),
+        "papelao" => (Tex::Cardboard, 0.4, 0.05, false),
+        "folhagem" => (Tex::Leaf, 0.3, 0.2, false),
+        "concreto" | "ceramica" => (Tex::Concrete, 0.4, 0.1, false),
+        "vidro" => (Tex::Glass, 1.0, 0.8, false),
+        "tela" => (Tex::Screen, 1.0, 0.6, false),
+        "luz" => (Tex::White, 1.0, 0.0, true),
+        _ => (Tex::White, 1.0, 0.2, false),
+    }
+}
 
 pub struct Renderer {
     pub tex: std::collections::HashMap<Tex, Texture2D>,
@@ -407,8 +450,12 @@ pub struct Renderer {
     pub depth_mat: Option<Material>,
     /// Registro do carregamento de texturas externas (substituições aplicadas ou recusadas).
     pub asset_log: Vec<String>,
+    /// Modelos externos (assets/models), por nome de arquivo sem extensão.
+    pub models: std::collections::HashMap<String, Model>,
     pub shadow_rt: Option<RenderTarget>,
     pub shadows: bool,
+    /// Assinatura da geometria do último mapa de sombras: se a cena não mudou, o mapa é reaproveitado.
+    shadow_sig: u64,
 }
 
 impl Renderer {
@@ -469,11 +516,15 @@ impl Renderer {
         .ok();
         let shadow_rt = render_target_ex(SHADOW_RES, SHADOW_RES, RenderTargetParams { sample_count: 1, depth: true });
         shadow_rt.texture.set_filter(FilterMode::Nearest);
-        Renderer { tex, mat, batches: vec![], screen_tex: None, quality_high: true, depth_mat, asset_log, shadow_rt: Some(shadow_rt), shadows: true }
+        let (models, mlog) = crate::assets::load_models();
+        for l in &mlog {
+            eprintln!("[assets] {}", l);
+        }
+        Renderer { tex, mat, batches: vec![], screen_tex: None, quality_high: true, depth_mat, asset_log, models, shadow_rt: Some(shadow_rt), shadows: true, shadow_sig: 0 }
     }
 
     fn batch(&mut self, t: Tex) -> usize {
-        if let Some(i) = self.batches.iter().position(|b| b.0 == t && b.1.len() < 60000) {
+        if let Some(i) = self.batches.iter().position(|b| b.0 == t && b.1.len() + 4 <= MAX_BATCH_VERTS && b.2.len() + 6 <= MAX_BATCH_INDICES) {
             return i;
         }
         self.batches.push((t, Vec::with_capacity(4096), Vec::with_capacity(8192)));
@@ -521,7 +572,24 @@ impl Renderer {
         let use_shadows = self.shadows && self.depth_mat.is_some() && self.shadow_rt.is_some();
         let light_cam = self.light_camera();
         let light_vp = light_cam.matrix();
+        // a luz é fixa: o mapa só precisa ser refeito quando a geometria muda (item aberto,
+        // lacre, objeto movido...). Assinatura barata: amostra de vértices de cada lote.
+        let mut sig: u64 = 0xcbf2_9ce4_8422_2325;
         if use_shadows {
+            for (t, v, idx) in &batches {
+                let mut mix = |x: u64| sig = (sig ^ x).wrapping_mul(0x100_0000_01b3);
+                mix(*t as u64);
+                mix(v.len() as u64);
+                mix(idx.len() as u64);
+                for vx in v.iter().step_by(37) {
+                    mix(vx.position.x.to_bits() as u64);
+                    mix(vx.position.y.to_bits() as u64);
+                    mix(vx.position.z.to_bits() as u64);
+                }
+            }
+        }
+        if use_shadows && sig != self.shadow_sig {
+            self.shadow_sig = sig;
             set_camera(&light_cam);
             clear_background(WHITE);
             gl_use_material(self.depth_mat.as_ref().unwrap());
@@ -611,6 +679,57 @@ impl Renderer {
 
     pub fn bx(&mut self, c: Vec3, size: Vec3, mt: M) {
         self.boxr(c, size, 0.0, mt);
+    }
+
+    pub fn has_model(&self, name: &str) -> bool {
+        self.models.contains_key(name)
+    }
+
+    /// Desenha um modelo externo no piso em `at`, girado `rot_y` (mesma convenção de `boxr`).
+    /// `over` substitui materiais pelo nome (ex.: ("tela", emissivo da área de trabalho)).
+    /// Devolve false se o modelo não existe — quem chama desenha a versão procedural.
+    pub fn model(&mut self, name: &str, at: Vec3, rot_y: f32, over: &[(&str, M)]) -> bool {
+        self.model_s(name, at, rot_y, 1.0, over)
+    }
+
+    /// Como `model`, com escala uniforme.
+    pub fn model_s(&mut self, name: &str, at: Vec3, rot_y: f32, scale: f32, over: &[(&str, M)]) -> bool {
+        let Some(model) = self.models.remove(name) else { return false };
+        let (s, co) = rot_y.sin_cos();
+        let tr = |p: Vec3| -> Vec3 {
+            let p = p * scale;
+            vec3(at.x + p.x * co + p.z * s, at.y + p.y, at.z - p.x * s + p.z * co)
+        };
+        let rn = |n: Vec3| -> Vec3 { vec3(n.x * co + n.z * s, n.y, -n.x * s + n.z * co) };
+        for part in &model.parts {
+            let mt = over.iter().find(|(k, _)| *k == part.material).map(|(_, m)| *m).unwrap_or(part.mt);
+            let k = 1.0 / mt.tile.max(0.001);
+            let w = if mt.emis { 2.0 } else { mt.spec };
+            for (verts, idx) in &part.chunks {
+                let i = self.batch_room(mt.t, verts.len(), idx.len());
+                let b = &mut self.batches[i];
+                let base = b.1.len() as u16;
+                let raw_uv = mt.tile >= 0.999 && (mt.emis || mt.t == Tex::Screen || mt.t == Tex::Desktop);
+                for &(p, n, uv) in verts {
+                    let wp = tr(p);
+                    let ao = if mt.emis { 1.0 } else { (0.62 + wp.y * 0.9).min(1.0) };
+                    let col = [(mt.c.r * ao * 255.0) as u8, (mt.c.g * ao * 255.0) as u8, (mt.c.b * ao * 255.0) as u8, (mt.c.a * 255.0) as u8];
+                    b.1.push(Vertex { position: wp, uv: if raw_uv { uv } else { uv * k }, color: col, normal: rn(n).extend(w) });
+                }
+                b.2.extend(idx.iter().map(|&x| base + x));
+            }
+        }
+        self.models.insert(name.to_string(), model);
+        true
+    }
+
+    /// Lote da textura com espaço para mais `n` vértices.
+    fn batch_room(&mut self, t: Tex, nv: usize, ni: usize) -> usize {
+        if let Some(i) = self.batches.iter().position(|b| b.0 == t && b.1.len() + nv <= MAX_BATCH_VERTS && b.2.len() + ni <= MAX_BATCH_INDICES) {
+            return i;
+        }
+        self.batches.push((t, Vec::with_capacity(nv.max(4096)), Vec::with_capacity(ni.max(8192))));
+        self.batches.len() - 1
     }
 
     /// Face única (ex.: tela) com UV 0..1 — usada para a captura da área de trabalho.
