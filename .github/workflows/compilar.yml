@@ -1,5 +1,6 @@
 # Compila e testa o Perícia Sim no Linux, no Windows e no macOS.
-# Em uma tag "v*" (ex.: v0.9.1), publica os pacotes das três plataformas como Release.
+# A cada push na main (ou tag "v*"), publica — ou atualiza — a Release "v<versão do Cargo.toml>"
+# com os pacotes das três plataformas.
 name: Compilar
 
 on:
@@ -67,14 +68,23 @@ jobs:
 
   publicar:
     needs: compilar
-    if: startsWith(github.ref, 'refs/tags/v')
+    if: github.event_name == 'push' && (github.ref == 'refs/heads/main' || startsWith(github.ref, 'refs/tags/v'))
     runs-on: ubuntu-latest
     steps:
+      - uses: actions/checkout@v4
+      - name: Versão
+        id: versao
+        run: echo "tag=v$(grep -m1 '^version' Cargo.toml | cut -d'"' -f2)" >> "$GITHUB_OUTPUT"
       - uses: actions/download-artifact@v4
         with:
           path: pacotes
           merge-multiple: true
       - uses: softprops/action-gh-release@v2
         with:
+          tag_name: ${{ steps.versao.outputs.tag }}
+          name: PeriSim ${{ steps.versao.outputs.tag }}
+          target_commitish: ${{ github.sha }}
           files: pacotes/*
+          overwrite_files: true
+          make_latest: true
           generate_release_notes: true
